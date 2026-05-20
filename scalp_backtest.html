@@ -152,11 +152,12 @@
         <div class="rule-row"><span class="rtag rtag-bull">4</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
       </div>
       <div class="rule-col">
-        <h4 style="color:var(--bear)">▼ Short Entry</h4>
-        <div class="rule-row"><span class="rtag rtag-bear">1</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
-        <div class="rule-row"><span class="rtag rtag-ml">2</span> Price is <strong>below</strong> the 5-day SMA (480-period macro trend filter)</div>
-        <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — skip entries in flat/ranging markets</div>
-        <div class="rule-row"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
+        <h4 style="color:var(--bear)" style="opacity:0.4">▼ Short Entry — <span style="color:var(--warn);font-size:11px">DISABLED (bull regime)</span></h4>
+        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-bear">1</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
+        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-ml">2</span> Price is <strong>below</strong> the 5-day SMA (480-period macro trend filter)</div>
+        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — skip entries in flat/ranging markets</div>
+        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
+        <div class="rule-row" style="border-color:var(--warn);background:#f5a62311;margin-top:6px"><span class="rtag" style="background:#f5a62333;color:var(--warn)">!</span> Short WR was <strong>24%</strong> — below 33% break-even. Re-enable when daily trend turns bearish.</div>
       </div>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px">
@@ -195,6 +196,7 @@ const MOMENTUM_THRESH = 0.35;    // candle must close in top/bottom 35% of range
 const MACRO_PERIOD    = 480;     // 480 × 15min = 5-day macro trend SMA
 const SLOPE_WINDOW    = 8;       // candles to measure SMA200 slope (2 hrs)
 const SLOPE_THRESH    = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
+const LONG_ONLY       = true;    // disable shorts — 24% short WR is unprofitable in bull regime
 const TARGET_CANDLES  = 4000;    // ~6 weeks of 15min data
 const BYBIT_URL       = 'https://api.bybit.com/v5/market/kline';
 
@@ -403,9 +405,9 @@ function runBacktest(zoneData) {
           && isTrending
           && isMomentumCandle(curr.candle, 'long');
 
-        // SHORT signal
+        // SHORT signal (disabled in bull regime — 24% WR is below 33% break-even)
         const freshBear = curr.zone === 'bear' && prev.zone !== 'bear';
-        const shortOk   = freshBear
+        const shortOk   = !LONG_ONLY && freshBear
           && macroDown
           && isTrending
           && isMomentumCandle(curr.candle, 'short');

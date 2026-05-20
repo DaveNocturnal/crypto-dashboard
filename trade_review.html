@@ -326,8 +326,8 @@ function runScalpBacktest(zoneData, p) {
         const macroDown  = !curr.sma480 || curr.price < curr.sma480;
         const prevSma200 = idx >= 8 ? zoneData[idx-8].sma200 : null;
         const trending   = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= 0.0004;
-        const dir = (freshBull && macroUp && trending && isMom(curr.candle,'long')) ? 'long'
-                  : (freshBear && macroDown && trending && isMom(curr.candle,'short')) ? 'short' : null;
+        const dir = (freshBull && macroUp && trending && isMom(curr.candle,'long')) ? 'long' : null;
+        // Shorts disabled — 24% WR < 33% break-even threshold in current bull regime
         if (dir) {
           const riskAmt=capital*riskPct;
           const slPx = dir==='long' ? curr.lo*(1-stopBuffer) : curr.hi*(1+stopBuffer);
