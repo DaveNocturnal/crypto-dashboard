@@ -161,8 +161,8 @@
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px">
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bull">TP</span> Take profit at <strong>2× the stop distance</strong> (fixed 2:1 R:R — no exceptions)</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop at BMSB band edge <strong>± 0.3% buffer</strong> (was 0.1% — widened for noise)</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>8 candles (2 hours)</strong> if TP/SL not hit</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop at BMSB band edge <strong>± 0.2% buffer</strong> (was 0.1% — widened for noise)</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>12 candles (3 hours)</strong> if TP/SL not hit</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-neu">MAX</span> <strong>3 trades per day</strong> max. Resets at UTC midnight.</div>
     </div>
   </div>
@@ -188,13 +188,13 @@
 const INITIAL_CAPITAL = 1000;
 const RISK_PCT        = 0.01;    // 1% of current capital
 const RR_TARGET       = 2.0;     // 2:1 take-profit ratio
-const MAX_HOLD        = 8;       // max candles before time stop (2 hours) — was 12
+const MAX_HOLD        = 12;      // max candles before time stop (3 hours)
 const MAX_TRADES_DAY  = 3;       // max trades per calendar day
-const STOP_BUFFER     = 0.003;   // 0.3% beyond band edge — was 0.001 (too tight)
+const STOP_BUFFER     = 0.002;   // 0.2% beyond band edge — was 0.1% (too tight)
 const MOMENTUM_THRESH = 0.35;    // candle must close in top/bottom 35% of range
 const MACRO_PERIOD    = 480;     // 480 × 15min = 5-day macro trend SMA
 const SLOPE_WINDOW    = 8;       // candles to measure SMA200 slope (2 hrs)
-const SLOPE_THRESH    = 0.0008;  // skip entry if 200SMA moved < 0.08% in 2hrs (flat market)
+const SLOPE_THRESH    = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
 const TARGET_CANDLES  = 4000;    // ~6 weeks of 15min data
 const BYBIT_URL       = 'https://api.bybit.com/v5/market/kline';
 
@@ -339,7 +339,7 @@ function runBacktest(zoneData) {
         // Time stop
         } else if (idx - pos.entryIdx >= MAX_HOLD) {
           exitPx  = curr.price;
-          exitWhy = 'Time Stop (2h)';
+          exitWhy = 'Time Stop (3h)';
         }
       } else {
         // SHORT
@@ -351,7 +351,7 @@ function runBacktest(zoneData) {
           exitWhy = 'Stop Loss';
         } else if (idx - pos.entryIdx >= MAX_HOLD) {
           exitPx  = curr.price;
-          exitWhy = 'Time Stop (2h)';
+          exitWhy = 'Time Stop (3h)';
         }
       }
 
