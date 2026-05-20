@@ -257,6 +257,36 @@ async function fetchBTC15m() {
   return all.slice(-4000);
 }
 
+async function fetchDailyRegimeMap() {
+  const url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=D&limit=60`;
+  const r   = await fetch(url);
+  const d   = await r.json();
+  if (d.retCode !== 0) throw new Error(d.retMsg);
+  const candles = d.result.list.slice().reverse()
+    .map(c => ({ ts: +c[0], close: +c[4] }));
+  const closes = candles.map(c => c.close);
+  const n = closes.length;
+  // Daily SMA20
+  const sma20 = new Array(n).fill(null);
+  let dSum = 0;
+  for (let i = 0; i < n; i++) {
+    dSum += closes[i];
+    if (i >= 20) dSum -= closes[i - 20];
+    if (i >= 19) sma20[i] = dSum / 20;
+  }
+  // Map each date to PREVIOUS day's regime (no lookahead)
+  const map = {};
+  for (let i = 1; i < n; i++) {
+    if (sma20[i - 1] === null) continue;
+    const pct    = (closes[i - 1] - sma20[i - 1]) / sma20[i - 1];
+    const regime = pct >  0.01 ? 'bull'
+                 : pct < -0.01 ? 'bear' : 'range';
+    const dateStr = new Date(candles[i].ts).toISOString().slice(0, 10);
+    map[dateStr] = regime;
+  }
+  return map;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  ZONE COMPUTATION (shared)
 // ═══════════════════════════════════════════════════════════════
@@ -288,7 +318,7 @@ function computeZones(candles) {
 // ═══════════════════════════════════════════════════════════════
 //  BACKTEST ENGINES
 // ═══════════════════════════════════════════════════════════════
-function runScalpBacktest(zoneData, p) {
+function runScalpBacktest(zoneData, p, dailyRegimeMap = {}) {
   const { riskPct, maxHold, stopBuffer, momentumThresh, minStop, maxStop, rrTarget } = p;
   let capital = 1000; const trades = [], tradeCnt = {};
   let pos = null;
@@ -323,10 +353,8 @@ function runScalpBacktest(zoneData, p) {
       if (cnt < 3) {
         const freshBull  = curr.zone==='bull' && prev.zone!=='bull';
         const freshBear  = curr.zone==='bear' && prev.zone!=='bear';
-        // Auto regime: SMA96 (24hr) vs SMA480 (5-day) crossover — fires at start of trend
-        const regime = (!curr.sma96||!curr.sma480) ? 'neutral'
-                     : (curr.sma96-curr.sma480)/curr.sma480 >  0.003 ? 'bull'
-                     : (curr.sma96-curr.sma480)/curr.sma480 < -0.003 ? 'bear' : 'range';
+        // Daily candle regime: yesterday's close vs 20-day SMA (no lookahead)
+        const regime = dailyRegimeMap[dk] || 'neutral';
         const prevSma200 = idx >= 8 ? zoneData[idx-8].sma200 : null;
         const trending   = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= 0.0004;
         const dir = (freshBull && (regime==='bull'||regime==='neutral') && trending && isMom(curr.candle,'long'))  ? 'long'
@@ -647,7 +675,7 @@ async function runComparison() {
     if (!zoneData) { btn.textContent = '🔁 Compare with original'; btn.disabled = false; return; }
 
     const { trades: newTrades, finalCapital: newCap } = currentBot === 'scalp'
-      ? runScalpBacktest(zoneData, p)
+      ? runScalpBacktest(zoneData, p, lastResults._dailyRegimeMap || {})
       : runDailyBacktest(zoneData, p);
 
     const orig = lastResults;
@@ -762,13 +790,17 @@ async function runReview() {
   document.getElementById('app').innerHTML = `<div class="loading"><div class="spinner"></div><div>Fetching ${currentBot==='scalp'?'15min':'daily'} BTC data…</div></div>`;
 
   try {
-    const candles   = currentBot === 'scalp' ? await fetchBTC15m() : await fetchBTCDaily();
-    const zoneData  = computeZones(candles);
-    const { trades, finalCapital } = currentBot === 'scalp'
-      ? runScalpBacktest(zoneData, DEFAULT_PARAMS.scalp)
-      : runDailyBacktest(zoneData, DEFAULT_PARAMS.daily);
+    const candles = currentBot === 'scalp' ? await fetchBTC15m() : await fetchBTCDaily();
+    const zoneData = computeZones(candles);
+    let trades, finalCapital, dailyRegimeMap = {};
+    if (currentBot === 'scalp') {
+      dailyRegimeMap = await fetchDailyRegimeMap();
+      ({ trades, finalCapital } = runScalpBacktest(zoneData, DEFAULT_PARAMS.scalp, dailyRegimeMap));
+    } else {
+      ({ trades, finalCapital } = runDailyBacktest(zoneData, DEFAULT_PARAMS.daily));
+    }
 
-    lastResults = { trades, finalCapital, _zoneData: zoneData };
+    lastResults = { trades, finalCapital, _zoneData: zoneData, _dailyRegimeMap: dailyRegimeMap };
     renderResults(trades, finalCapital);
   } catch(e) {
     document.getElementById('app').innerHTML = `<div class="loading"><div style="color:var(--bear)">${e.message}</div><div style="font-size:12px;color:var(--muted);margin-top:8px">Run via: <code style="color:var(--warn);background:#ffffff0d;padding:2px 6px;border-radius:4px">python3 -m http.server 8080</code></div></div>`;
