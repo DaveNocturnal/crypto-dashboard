@@ -146,14 +146,14 @@
     <div class="rules-grid">
       <div class="rule-col">
         <h4 style="color:var(--bull)">▲ Long Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BULL regime</span></h4>
-        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>24hr SMA crosses above 5-day SMA</strong> by &gt;0.3% — bot detects bull regime at trend start</div>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>Yesterday's daily close above 20-day SMA</strong> by &gt;1% — daily candle sets the regime</div>
         <div class="rule-row"><span class="rtag rtag-bull">2</span> 15min BMSB zone freshly enters <strong>Bull</strong> (previous was Support or Bear)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bull">4</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
       </div>
       <div class="rule-col">
         <h4 style="color:var(--bear)">▼ Short Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BEAR regime</span></h4>
-        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>24hr SMA crosses below 5-day SMA</strong> by &gt;0.3% — bot detects bear regime at trend start</div>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>Yesterday's daily close below 20-day SMA</strong> by &gt;1% — daily candle sets the regime</div>
         <div class="rule-row"><span class="rtag rtag-bear">2</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
@@ -164,7 +164,7 @@
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop at BMSB band edge <strong>± 0.2% buffer</strong> (was 0.1% — widened for noise)</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>12 candles (3 hours)</strong> if TP/SL not hit</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-neu">MAX</span> <strong>3 trades per day</strong> max. Resets at UTC midnight.</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px;border:1px solid var(--bdr);padding:6px 10px!important;border-radius:6px;background:var(--card2)"><span class="rtag" style="background:#7c9cc822;color:var(--ml);border-color:#7c9cc844">RANGE</span> 5-day SMA flat → <strong>all entries skipped</strong>, capital preserved until trend returns</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px;border:1px solid var(--bdr);padding:6px 10px!important;border-radius:6px;background:var(--card2)"><span class="rtag" style="background:#7c9cc822;color:var(--ml);border-color:#7c9cc844">RANGE</span> Daily close within 1% of 20-day SMA → <strong>all entries skipped</strong>, capital preserved</div>
     </div>
   </div>
 
@@ -196,8 +196,8 @@ const MOMENTUM_THRESH = 0.35;    // candle must close in top/bottom 35% of range
 const MACRO_PERIOD    = 480;     // 480 × 15min = 5-day macro trend SMA
 const SLOPE_WINDOW    = 8;       // candles to measure SMA200 slope (2 hrs)
 const SLOPE_THRESH    = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
-const REGIME_PERIOD   = 96;      // 96 × 15min = 24hr SMA for regime crossover
-const REGIME_THRESH   = 0.003;   // 0.3% gap between SMA96 & SMA480 confirms regime
+const DAILY_SMA_PERIOD = 20;     // 20-day SMA for daily regime detection
+const DAILY_REGIME_PCT = 0.01;   // price must be >1% above/below SMA20 to confirm regime
 const TARGET_CANDLES  = 4000;    // ~6 weeks of 15min data
 const BYBIT_URL       = 'https://api.bybit.com/v5/market/kline';
 
@@ -240,6 +240,46 @@ async function fetchBTC15m() {
 
   setLoadBar(85);
   return all.slice(-TARGET_CANDLES);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DAILY REGIME — fetch daily candles, build date → regime map
+//  Uses PREVIOUS day's close vs SMA20 (no lookahead bias)
+//  bull  = close > SMA20 by >1%  → only longs allowed
+//  bear  = close < SMA20 by >1%  → only shorts allowed
+//  range = within 1% of SMA20    → all entries skipped
+// ═══════════════════════════════════════════════════════════════
+async function fetchDailyRegimeMap() {
+  const url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=D&limit=60`;
+  const r   = await fetch(url);
+  const d   = await r.json();
+  if (d.retCode !== 0) throw new Error(d.retMsg);
+  const candles = d.result.list.slice().reverse()
+    .map(c => ({ ts: +c[0], close: +c[4] }));
+
+  const closes = candles.map(c => c.close);
+  const n      = closes.length;
+
+  // Daily SMA20
+  const sma20  = new Array(n).fill(null);
+  let   dSum   = 0;
+  for (let i = 0; i < n; i++) {
+    dSum += closes[i];
+    if (i >= DAILY_SMA_PERIOD) dSum -= closes[i - DAILY_SMA_PERIOD];
+    if (i >= DAILY_SMA_PERIOD - 1) sma20[i] = dSum / DAILY_SMA_PERIOD;
+  }
+
+  // Map each date to the PREVIOUS day's regime (no lookahead)
+  const map = {};
+  for (let i = 1; i < n; i++) {
+    if (sma20[i - 1] === null) continue;
+    const pct    = (closes[i - 1] - sma20[i - 1]) / sma20[i - 1];
+    const regime = pct >  DAILY_REGIME_PCT ? 'bull'
+                 : pct < -DAILY_REGIME_PCT ? 'bear' : 'range';
+    const dateStr = new Date(candles[i].ts).toISOString().slice(0, 10);
+    map[dateStr]  = regime;
+  }
+  return map;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -323,7 +363,7 @@ function isMomentumCandle(candle, direction) {
 // ═══════════════════════════════════════════════════════════════
 //  BACKTEST ENGINE
 // ═══════════════════════════════════════════════════════════════
-function runBacktest(zoneData) {
+function runBacktest(zoneData, dailyRegimeMap) {
   let capital     = INITIAL_CAPITAL;
   const trades    = [];
   const equity    = [{ ts: zoneData[0].candle.ts, capital }];
@@ -401,16 +441,12 @@ function runBacktest(zoneData) {
       const cnt = tradeCnt[dKey] || 0;
       if (cnt < MAX_TRADES_DAY) {
 
-        // ── AUTO REGIME DETECTION (dual SMA crossover) ─────────
-        // Compare 24-hour SMA (fast) vs 5-day SMA (slow).
-        // Crossover fires at the START of a trend — not after most of the move is done.
-        // SMA96 > SMA480 + threshold → bull  (24hr avg above 5-day avg = uptrend)
-        // SMA96 < SMA480 - threshold → bear  (24hr avg below 5-day avg = downtrend)
-        // within threshold            → range (no clear direction → sit out)
-        const regime = (!curr.sma96 || !curr.sma480) ? 'neutral'
-          : (curr.sma96 - curr.sma480) / curr.sma480 >  REGIME_THRESH ? 'bull'
-          : (curr.sma96 - curr.sma480) / curr.sma480 < -REGIME_THRESH ? 'bear'
-          : 'range';
+        // ── DAILY REGIME LOOKUP ─────────────────────────────────
+        // Use yesterday's daily close vs daily SMA20 to classify the market.
+        // This is the cleanest regime source — daily candles aren't fooled by
+        // intraday noise, and using YESTERDAY prevents lookahead bias.
+        const dateStr = new Date(curr.candle.ts).toISOString().slice(0, 10);
+        const regime  = dailyRegimeMap[dateStr] || 'neutral';
 
         // Local slope filter: skip if 200SMA is also flat (double confirmation)
         const prevSma200 = idx >= SLOPE_WINDOW ? zoneData[idx - SLOPE_WINDOW].sma200 : null;
@@ -811,6 +847,8 @@ async function runAll() {
     </div>`;
 
   try {
+    setLoadStatus('Fetching daily candles for regime detection…');
+    const dailyRegimeMap = await fetchDailyRegimeMap();
     const candles = await fetchBTC15m();
     setLoadBar(88); setLoadStatus('Computing BMSB zones…');
     await new Promise(r => setTimeout(r, 30)); // allow DOM repaint
@@ -819,7 +857,7 @@ async function runAll() {
     setLoadBar(93); setLoadStatus('Running backtest…');
     await new Promise(r => setTimeout(r, 30));
 
-    const { trades, equity, finalCapital, tradeCnt } = runBacktest(zoneData);
+    const { trades, equity, finalCapital, tradeCnt } = runBacktest(zoneData, dailyRegimeMap);
     setLoadBar(100); setLoadStatus('Rendering results…');
     await new Promise(r => setTimeout(r, 50));
 
