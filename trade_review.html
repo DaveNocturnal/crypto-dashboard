@@ -322,12 +322,16 @@ function runScalpBacktest(zoneData, p) {
       if (cnt < 3) {
         const freshBull  = curr.zone==='bull' && prev.zone!=='bull';
         const freshBear  = curr.zone==='bear' && prev.zone!=='bear';
-        const macroUp    = !curr.sma480 || curr.price > curr.sma480;
-        const macroDown  = !curr.sma480 || curr.price < curr.sma480;
+        // Auto regime detection — 5-day SMA slope over 8 hours
+        const macroRef   = idx >= 32 ? zoneData[idx-32].sma480 : null;
+        const slopeRaw   = (curr.sma480 && macroRef) ? (curr.sma480 - macroRef)/macroRef : 0;
+        const regime     = !curr.sma480||!macroRef ? 'neutral'
+                         : slopeRaw >  0.002 ? 'bull'
+                         : slopeRaw < -0.002 ? 'bear' : 'range';
         const prevSma200 = idx >= 8 ? zoneData[idx-8].sma200 : null;
         const trending   = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= 0.0004;
-        const dir = (freshBull && macroUp && trending && isMom(curr.candle,'long')) ? 'long' : null;
-        // Shorts disabled — 24% WR < 33% break-even threshold in current bull regime
+        const dir = (freshBull && (regime==='bull'||regime==='neutral') && trending && isMom(curr.candle,'long'))  ? 'long'
+                  : (freshBear && (regime==='bear'||regime==='neutral') && trending && isMom(curr.candle,'short')) ? 'short' : null;
         if (dir) {
           const riskAmt=capital*riskPct;
           const slPx = dir==='long' ? curr.lo*(1-stopBuffer) : curr.hi*(1+stopBuffer);

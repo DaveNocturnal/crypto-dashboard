@@ -145,19 +145,18 @@
     <div class="section-title">⚡ Scalp Strategy Rules — 15min BTC</div>
     <div class="rules-grid">
       <div class="rule-col">
-        <h4 style="color:var(--bull)">▲ Long Entry</h4>
-        <div class="rule-row"><span class="rtag rtag-bull">1</span> 15min BMSB zone freshly enters <strong>Bull</strong> (previous was Support or Bear)</div>
-        <div class="rule-row"><span class="rtag rtag-ml">2</span> Price is <strong>above</strong> the 5-day SMA (480-period macro trend filter)</div>
-        <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — skip entries in flat/ranging markets</div>
+        <h4 style="color:var(--bull)">▲ Long Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BULL regime</span></h4>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>5-day SMA rising</strong> &gt; 0.2% over 8hrs — bot detects bull regime automatically</div>
+        <div class="rule-row"><span class="rtag rtag-bull">2</span> 15min BMSB zone freshly enters <strong>Bull</strong> (previous was Support or Bear)</div>
+        <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bull">4</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
       </div>
       <div class="rule-col">
-        <h4 style="color:var(--bear)" style="opacity:0.4">▼ Short Entry — <span style="color:var(--warn);font-size:11px">DISABLED (bull regime)</span></h4>
-        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-bear">1</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
-        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-ml">2</span> Price is <strong>below</strong> the 5-day SMA (480-period macro trend filter)</div>
-        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — skip entries in flat/ranging markets</div>
-        <div class="rule-row" style="opacity:0.45"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
-        <div class="rule-row" style="border-color:var(--warn);background:#f5a62311;margin-top:6px"><span class="rtag" style="background:#f5a62333;color:var(--warn)">!</span> Short WR was <strong>24%</strong> — below 33% break-even. Re-enable when daily trend turns bearish.</div>
+        <h4 style="color:var(--bear)">▼ Short Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BEAR regime</span></h4>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>5-day SMA falling</strong> &lt; −0.2% over 8hrs — bot detects bear regime automatically</div>
+        <div class="rule-row"><span class="rtag rtag-bear">2</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
+        <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
+        <div class="rule-row"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
       </div>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px">
@@ -165,6 +164,7 @@
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop at BMSB band edge <strong>± 0.2% buffer</strong> (was 0.1% — widened for noise)</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>12 candles (3 hours)</strong> if TP/SL not hit</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-neu">MAX</span> <strong>3 trades per day</strong> max. Resets at UTC midnight.</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px;border:1px solid var(--bdr);padding:6px 10px!important;border-radius:6px;background:var(--card2)"><span class="rtag" style="background:#7c9cc822;color:var(--ml);border-color:#7c9cc844">RANGE</span> 5-day SMA flat → <strong>all entries skipped</strong>, capital preserved until trend returns</div>
     </div>
   </div>
 
@@ -196,7 +196,8 @@ const MOMENTUM_THRESH = 0.35;    // candle must close in top/bottom 35% of range
 const MACRO_PERIOD    = 480;     // 480 × 15min = 5-day macro trend SMA
 const SLOPE_WINDOW    = 8;       // candles to measure SMA200 slope (2 hrs)
 const SLOPE_THRESH    = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
-const LONG_ONLY       = true;    // disable shorts — 24% short WR is unprofitable in bull regime
+const REGIME_WINDOW   = 32;      // 32 × 15min = 8hr window to measure SMA480 slope
+const REGIME_THRESH   = 0.002;   // 0.2% SMA480 move in 8hrs = trending regime
 const TARGET_CANDLES  = 4000;    // ~6 weeks of 15min data
 const BYBIT_URL       = 'https://api.bybit.com/v5/market/kline';
 
@@ -390,25 +391,31 @@ function runBacktest(zoneData) {
       const cnt = tradeCnt[dKey] || 0;
       if (cnt < MAX_TRADES_DAY) {
 
-        // Macro trend: price vs 5-day SMA (skips trades fighting the weekly direction)
-        const macroUp   = !curr.sma480 || curr.price > curr.sma480;
-        const macroDown = !curr.sma480 || curr.price < curr.sma480;
+        // ── AUTO REGIME DETECTION ──────────────────────────────
+        // Read the 5-day SMA slope over the last 8 hours to classify the market
+        const macroRef   = idx >= REGIME_WINDOW ? zoneData[idx - REGIME_WINDOW].sma480 : null;
+        const regimeSlopePct = (curr.sma480 && macroRef)
+          ? (curr.sma480 - macroRef) / macroRef : 0;
+        const regime = !curr.sma480 || !macroRef ? 'neutral'
+          : regimeSlopePct >  REGIME_THRESH ? 'bull'   // SMA480 rising → longs only
+          : regimeSlopePct < -REGIME_THRESH ? 'bear'   // SMA480 falling → shorts only
+          : 'range';                                    // SMA480 flat → skip both
 
-        // Slope filter: skip entries when 200SMA is flat → ranging/choppy market
-        const prevSma200  = idx >= SLOPE_WINDOW ? zoneData[idx - SLOPE_WINDOW].sma200 : null;
-        const isTrending  = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= SLOPE_THRESH;
+        // Local slope filter: skip if 200SMA is also flat (double confirmation)
+        const prevSma200 = idx >= SLOPE_WINDOW ? zoneData[idx - SLOPE_WINDOW].sma200 : null;
+        const isTrending = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= SLOPE_THRESH;
 
-        // LONG signal
+        // LONG signal — only fires in bull or neutral regime
         const freshBull = curr.zone === 'bull' && prev.zone !== 'bull';
         const longOk    = freshBull
-          && macroUp
+          && (regime === 'bull' || regime === 'neutral')
           && isTrending
           && isMomentumCandle(curr.candle, 'long');
 
-        // SHORT signal (disabled in bull regime — 24% WR is below 33% break-even)
+        // SHORT signal — only fires in bear or neutral regime
         const freshBear = curr.zone === 'bear' && prev.zone !== 'bear';
-        const shortOk   = !LONG_ONLY && freshBear
-          && macroDown
+        const shortOk   = freshBear
+          && (regime === 'bear' || regime === 'neutral')
           && isTrending
           && isMomentumCandle(curr.candle, 'short');
 
