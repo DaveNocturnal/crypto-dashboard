@@ -222,7 +222,7 @@ let currentBot  = 'scalp';
 let lastResults = null;
 
 const DEFAULT_PARAMS = {
-  scalp: { riskPct:0.01, maxHold:12, stopBuffer:0.001, momentumThresh:0.35, minStop:0.001, maxStop:0.08, rrTarget:2.0 },
+  scalp: { riskPct:0.01, maxHold:8, stopBuffer:0.003, momentumThresh:0.35, minStop:0.001, maxStop:0.08, rrTarget:2.0 },
   daily: { riskPct:0.01, maxHold:30, stopBuffer:0.002, minStop:0.005, maxStop:0.15 },
 };
 let customParams = JSON.parse(JSON.stringify(DEFAULT_PARAMS));
@@ -272,10 +272,14 @@ function computeZones(candles) {
   const s200 = new Array(n).fill(null);
   let s2=0;
   for (let i=0;i<n;i++) { s2+=c[i]; if(i>=200)s2-=c[i-200]; s200[i]=s2/Math.min(i+1,200); }
+  // SMA480 — 5-day macro trend filter on 15min
+  const s480 = new Array(n).fill(null);
+  let s4=0;
+  for (let i=0;i<n;i++) { s4+=c[i]; if(i>=480)s4-=c[i-480]; if(i>=479)s480[i]=s4/480; }
   const zones = [];
   for (let i=21;i<n;i++) {
     const hi=Math.max(s20[i],e21[i]), lo=Math.min(s20[i],e21[i]);
-    zones.push({ i, price:c[i], hi, lo, sma200:s200[i], candle:candles[i], zone: c[i]>hi?'bull':c[i]<lo?'bear':'support' });
+    zones.push({ i, price:c[i], hi, lo, sma200:s200[i], sma480:s480[i], candle:candles[i], zone: c[i]>hi?'bull':c[i]<lo?'bear':'support' });
   }
   return zones;
 }
@@ -316,10 +320,14 @@ function runScalpBacktest(zoneData, p) {
     if (!pos) {
       const cnt = tradeCnt[dk]||0;
       if (cnt < 3) {
-        const freshBull = curr.zone==='bull' && prev.zone!=='bull';
-        const freshBear = curr.zone==='bear' && prev.zone!=='bear';
-        const dir = (freshBull && curr.price>curr.sma200 && isMom(curr.candle,'long')) ? 'long'
-                  : (freshBear && curr.price<curr.sma200 && isMom(curr.candle,'short')) ? 'short' : null;
+        const freshBull  = curr.zone==='bull' && prev.zone!=='bull';
+        const freshBear  = curr.zone==='bear' && prev.zone!=='bear';
+        const macroUp    = !curr.sma480 || curr.price > curr.sma480;
+        const macroDown  = !curr.sma480 || curr.price < curr.sma480;
+        const prevSma200 = idx >= 8 ? zoneData[idx-8].sma200 : null;
+        const trending   = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= 0.0008;
+        const dir = (freshBull && macroUp && trending && isMom(curr.candle,'long')) ? 'long'
+                  : (freshBear && macroDown && trending && isMom(curr.candle,'short')) ? 'short' : null;
         if (dir) {
           const riskAmt=capital*riskPct;
           const slPx = dir==='long' ? curr.lo*(1-stopBuffer) : curr.hi*(1+stopBuffer);
@@ -514,7 +522,7 @@ function renderResults(trades, finalCapital, isCustom = false) {
       <div class="lab-grid">
         ${makeSlider('riskPct','Risk per Trade %', p.riskPct, 0.005, 0.03, 0.005, v=>(v*100).toFixed(1)+'%')}
         ${makeSlider('maxHold','Max Hold (candles)', p.maxHold, 4, 24, 1, v=>v+' ('+v*15+'min)')}
-        ${makeSlider('stopBuffer','Stop Buffer %', p.stopBuffer, 0.0005, 0.005, 0.0005, v=>(v*100).toFixed(2)+'%')}
+        ${makeSlider('stopBuffer','Stop Buffer %', p.stopBuffer, 0.0005, 0.008, 0.0005, v=>(v*100).toFixed(2)+'%')}
         ${makeSlider('momentumThresh','Momentum Threshold', p.momentumThresh, 0.2, 0.6, 0.05, v=>(v*100).toFixed(0)+'%')}
         ${makeSlider('rrTarget','R:R Target', p.rrTarget, 1.5, 4, 0.5, v=>v.toFixed(1)+':1')}
       </div>

@@ -147,20 +147,22 @@
       <div class="rule-col">
         <h4 style="color:var(--bull)">▲ Long Entry</h4>
         <div class="rule-row"><span class="rtag rtag-bull">1</span> 15min BMSB zone freshly enters <strong>Bull</strong> (previous was Support or Bear)</div>
-        <div class="rule-row"><span class="rtag rtag-ml">2</span> Price is <strong>above</strong> the 200-period SMA (Money Line on 15min)</div>
-        <div class="rule-row"><span class="rtag rtag-bull">3</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
+        <div class="rule-row"><span class="rtag rtag-ml">2</span> Price is <strong>above</strong> the 5-day SMA (480-period macro trend filter)</div>
+        <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — skip entries in flat/ranging markets</div>
+        <div class="rule-row"><span class="rtag rtag-bull">4</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
       </div>
       <div class="rule-col">
         <h4 style="color:var(--bear)">▼ Short Entry</h4>
         <div class="rule-row"><span class="rtag rtag-bear">1</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
-        <div class="rule-row"><span class="rtag rtag-ml">2</span> Price is <strong>below</strong> the 200-period SMA (Money Line on 15min)</div>
-        <div class="rule-row"><span class="rtag rtag-bear">3</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
+        <div class="rule-row"><span class="rtag rtag-ml">2</span> Price is <strong>below</strong> the 5-day SMA (480-period macro trend filter)</div>
+        <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — skip entries in flat/ranging markets</div>
+        <div class="rule-row"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
       </div>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px">
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bull">TP</span> Take profit at <strong>2× the stop distance</strong> (fixed 2:1 R:R — no exceptions)</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop at BMSB band edge (lower band for longs · upper band for shorts)</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>12 candles (3 hours)</strong> if TP/SL not hit</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop at BMSB band edge <strong>± 0.3% buffer</strong> (was 0.1% — widened for noise)</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>8 candles (2 hours)</strong> if TP/SL not hit</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-neu">MAX</span> <strong>3 trades per day</strong> max. Resets at UTC midnight.</div>
     </div>
   </div>
@@ -186,10 +188,13 @@
 const INITIAL_CAPITAL = 1000;
 const RISK_PCT        = 0.01;    // 1% of current capital
 const RR_TARGET       = 2.0;     // 2:1 take-profit ratio
-const MAX_HOLD        = 12;      // max candles before time stop (3 hours)
+const MAX_HOLD        = 8;       // max candles before time stop (2 hours) — was 12
 const MAX_TRADES_DAY  = 3;       // max trades per calendar day
-const STOP_BUFFER     = 0.001;   // 0.1% beyond band edge
+const STOP_BUFFER     = 0.003;   // 0.3% beyond band edge — was 0.001 (too tight)
 const MOMENTUM_THRESH = 0.35;    // candle must close in top/bottom 35% of range
+const MACRO_PERIOD    = 480;     // 480 × 15min = 5-day macro trend SMA
+const SLOPE_WINDOW    = 8;       // candles to measure SMA200 slope (2 hrs)
+const SLOPE_THRESH    = 0.0008;  // skip entry if 200SMA moved < 0.08% in 2hrs (flat market)
 const TARGET_CANDLES  = 4000;    // ~6 weeks of 15min data
 const BYBIT_URL       = 'https://api.bybit.com/v5/market/kline';
 
@@ -255,13 +260,22 @@ function computeAllZones(candles) {
     s20[i] = sum20 / 20;
   }
 
-  // SMA200 (Money Line)
+  // SMA200 (Money Line — 50hr on 15min)
   const s200 = new Array(n).fill(null);
   let sum200 = 0;
   for (let i = 0; i < n; i++) {
     sum200 += closes[i];
     if (i >= 200) sum200 -= closes[i - 200];
     s200[i] = sum200 / Math.min(i + 1, 200);
+  }
+
+  // SMA480 (Macro Trend — 5-day on 15min; real directional filter)
+  const s480 = new Array(n).fill(null);
+  let sum480 = 0;
+  for (let i = 0; i < n; i++) {
+    sum480 += closes[i];
+    if (i >= 480) sum480 -= closes[i - 480];
+    if (i >= 479) s480[i] = sum480 / 480;
   }
 
   const zones = [];
@@ -272,6 +286,7 @@ function computeAllZones(candles) {
     zones.push({
       i, price, hi, lo,
       sma200: s200[i],
+      sma480: s480[i],
       candle: candles[i],
       zone: price > hi ? 'bull' : price < lo ? 'bear' : 'support',
     });
@@ -324,7 +339,7 @@ function runBacktest(zoneData) {
         // Time stop
         } else if (idx - pos.entryIdx >= MAX_HOLD) {
           exitPx  = curr.price;
-          exitWhy = 'Time Stop (3h)';
+          exitWhy = 'Time Stop (2h)';
         }
       } else {
         // SHORT
@@ -336,7 +351,7 @@ function runBacktest(zoneData) {
           exitWhy = 'Stop Loss';
         } else if (idx - pos.entryIdx >= MAX_HOLD) {
           exitPx  = curr.price;
-          exitWhy = 'Time Stop (3h)';
+          exitWhy = 'Time Stop (2h)';
         }
       }
 
@@ -373,16 +388,26 @@ function runBacktest(zoneData) {
       const cnt = tradeCnt[dKey] || 0;
       if (cnt < MAX_TRADES_DAY) {
 
+        // Macro trend: price vs 5-day SMA (skips trades fighting the weekly direction)
+        const macroUp   = !curr.sma480 || curr.price > curr.sma480;
+        const macroDown = !curr.sma480 || curr.price < curr.sma480;
+
+        // Slope filter: skip entries when 200SMA is flat → ranging/choppy market
+        const prevSma200  = idx >= SLOPE_WINDOW ? zoneData[idx - SLOPE_WINDOW].sma200 : null;
+        const isTrending  = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= SLOPE_THRESH;
+
         // LONG signal
         const freshBull = curr.zone === 'bull' && prev.zone !== 'bull';
         const longOk    = freshBull
-          && curr.price > curr.sma200
+          && macroUp
+          && isTrending
           && isMomentumCandle(curr.candle, 'long');
 
         // SHORT signal
         const freshBear = curr.zone === 'bear' && prev.zone !== 'bear';
         const shortOk   = freshBear
-          && curr.price < curr.sma200
+          && macroDown
+          && isTrending
           && isMomentumCandle(curr.candle, 'short');
 
         const dir = longOk ? 'long' : shortOk ? 'short' : null;
