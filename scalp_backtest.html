@@ -146,14 +146,14 @@
     <div class="rules-grid">
       <div class="rule-col">
         <h4 style="color:var(--bull)">▲ Long Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BULL regime</span></h4>
-        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>5-day SMA rising</strong> &gt; 0.2% over 8hrs — bot detects bull regime automatically</div>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>24hr SMA crosses above 5-day SMA</strong> by &gt;0.3% — bot detects bull regime at trend start</div>
         <div class="rule-row"><span class="rtag rtag-bull">2</span> 15min BMSB zone freshly enters <strong>Bull</strong> (previous was Support or Bear)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bull">4</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
       </div>
       <div class="rule-col">
         <h4 style="color:var(--bear)">▼ Short Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BEAR regime</span></h4>
-        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>5-day SMA falling</strong> &lt; −0.2% over 8hrs — bot detects bear regime automatically</div>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>24hr SMA crosses below 5-day SMA</strong> by &gt;0.3% — bot detects bear regime at trend start</div>
         <div class="rule-row"><span class="rtag rtag-bear">2</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
@@ -196,8 +196,8 @@ const MOMENTUM_THRESH = 0.35;    // candle must close in top/bottom 35% of range
 const MACRO_PERIOD    = 480;     // 480 × 15min = 5-day macro trend SMA
 const SLOPE_WINDOW    = 8;       // candles to measure SMA200 slope (2 hrs)
 const SLOPE_THRESH    = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
-const REGIME_WINDOW   = 32;      // 32 × 15min = 8hr window to measure SMA480 slope
-const REGIME_THRESH   = 0.002;   // 0.2% SMA480 move in 8hrs = trending regime
+const REGIME_PERIOD   = 96;      // 96 × 15min = 24hr SMA for regime crossover
+const REGIME_THRESH   = 0.003;   // 0.3% gap between SMA96 & SMA480 confirms regime
 const TARGET_CANDLES  = 4000;    // ~6 weeks of 15min data
 const BYBIT_URL       = 'https://api.bybit.com/v5/market/kline';
 
@@ -272,7 +272,16 @@ function computeAllZones(candles) {
     s200[i] = sum200 / Math.min(i + 1, 200);
   }
 
-  // SMA480 (Macro Trend — 5-day on 15min; real directional filter)
+  // SMA96 (24-hour — fast regime SMA for crossover detection)
+  const s96  = new Array(n).fill(null);
+  let sum96  = 0;
+  for (let i = 0; i < n; i++) {
+    sum96 += closes[i];
+    if (i >= 96) sum96 -= closes[i - 96];
+    if (i >= 95) s96[i] = sum96 / 96;
+  }
+
+  // SMA480 (5-day — slow regime SMA for crossover detection)
   const s480 = new Array(n).fill(null);
   let sum480 = 0;
   for (let i = 0; i < n; i++) {
@@ -289,6 +298,7 @@ function computeAllZones(candles) {
     zones.push({
       i, price, hi, lo,
       sma200: s200[i],
+      sma96:  s96[i],
       sma480: s480[i],
       candle: candles[i],
       zone: price > hi ? 'bull' : price < lo ? 'bear' : 'support',
@@ -391,15 +401,16 @@ function runBacktest(zoneData) {
       const cnt = tradeCnt[dKey] || 0;
       if (cnt < MAX_TRADES_DAY) {
 
-        // ── AUTO REGIME DETECTION ──────────────────────────────
-        // Read the 5-day SMA slope over the last 8 hours to classify the market
-        const macroRef   = idx >= REGIME_WINDOW ? zoneData[idx - REGIME_WINDOW].sma480 : null;
-        const regimeSlopePct = (curr.sma480 && macroRef)
-          ? (curr.sma480 - macroRef) / macroRef : 0;
-        const regime = !curr.sma480 || !macroRef ? 'neutral'
-          : regimeSlopePct >  REGIME_THRESH ? 'bull'   // SMA480 rising → longs only
-          : regimeSlopePct < -REGIME_THRESH ? 'bear'   // SMA480 falling → shorts only
-          : 'range';                                    // SMA480 flat → skip both
+        // ── AUTO REGIME DETECTION (dual SMA crossover) ─────────
+        // Compare 24-hour SMA (fast) vs 5-day SMA (slow).
+        // Crossover fires at the START of a trend — not after most of the move is done.
+        // SMA96 > SMA480 + threshold → bull  (24hr avg above 5-day avg = uptrend)
+        // SMA96 < SMA480 - threshold → bear  (24hr avg below 5-day avg = downtrend)
+        // within threshold            → range (no clear direction → sit out)
+        const regime = (!curr.sma96 || !curr.sma480) ? 'neutral'
+          : (curr.sma96 - curr.sma480) / curr.sma480 >  REGIME_THRESH ? 'bull'
+          : (curr.sma96 - curr.sma480) / curr.sma480 < -REGIME_THRESH ? 'bear'
+          : 'range';
 
         // Local slope filter: skip if 200SMA is also flat (double confirmation)
         const prevSma200 = idx >= SLOPE_WINDOW ? zoneData[idx - SLOPE_WINDOW].sma200 : null;

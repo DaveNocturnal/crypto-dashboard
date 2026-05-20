@@ -272,14 +272,15 @@ function computeZones(candles) {
   const s200 = new Array(n).fill(null);
   let s2=0;
   for (let i=0;i<n;i++) { s2+=c[i]; if(i>=200)s2-=c[i-200]; s200[i]=s2/Math.min(i+1,200); }
-  // SMA480 — 5-day macro trend filter on 15min
-  const s480 = new Array(n).fill(null);
-  let s4=0;
+  // SMA96 (24hr fast regime SMA) + SMA480 (5-day slow regime SMA) for crossover
+  const s96=new Array(n).fill(null); let s9=0;
+  for (let i=0;i<n;i++) { s9+=c[i]; if(i>=96)s9-=c[i-96]; if(i>=95)s96[i]=s9/96; }
+  const s480=new Array(n).fill(null); let s4=0;
   for (let i=0;i<n;i++) { s4+=c[i]; if(i>=480)s4-=c[i-480]; if(i>=479)s480[i]=s4/480; }
   const zones = [];
   for (let i=21;i<n;i++) {
     const hi=Math.max(s20[i],e21[i]), lo=Math.min(s20[i],e21[i]);
-    zones.push({ i, price:c[i], hi, lo, sma200:s200[i], sma480:s480[i], candle:candles[i], zone: c[i]>hi?'bull':c[i]<lo?'bear':'support' });
+    zones.push({ i, price:c[i], hi, lo, sma200:s200[i], sma96:s96[i], sma480:s480[i], candle:candles[i], zone: c[i]>hi?'bull':c[i]<lo?'bear':'support' });
   }
   return zones;
 }
@@ -322,12 +323,10 @@ function runScalpBacktest(zoneData, p) {
       if (cnt < 3) {
         const freshBull  = curr.zone==='bull' && prev.zone!=='bull';
         const freshBear  = curr.zone==='bear' && prev.zone!=='bear';
-        // Auto regime detection — 5-day SMA slope over 8 hours
-        const macroRef   = idx >= 32 ? zoneData[idx-32].sma480 : null;
-        const slopeRaw   = (curr.sma480 && macroRef) ? (curr.sma480 - macroRef)/macroRef : 0;
-        const regime     = !curr.sma480||!macroRef ? 'neutral'
-                         : slopeRaw >  0.002 ? 'bull'
-                         : slopeRaw < -0.002 ? 'bear' : 'range';
+        // Auto regime: SMA96 (24hr) vs SMA480 (5-day) crossover — fires at start of trend
+        const regime = (!curr.sma96||!curr.sma480) ? 'neutral'
+                     : (curr.sma96-curr.sma480)/curr.sma480 >  0.003 ? 'bull'
+                     : (curr.sma96-curr.sma480)/curr.sma480 < -0.003 ? 'bear' : 'range';
         const prevSma200 = idx >= 8 ? zoneData[idx-8].sma200 : null;
         const trending   = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= 0.0004;
         const dir = (freshBull && (regime==='bull'||regime==='neutral') && trending && isMom(curr.candle,'long'))  ? 'long'
