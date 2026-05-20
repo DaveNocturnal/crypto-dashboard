@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trade Review & Training Journal</title>
+  <style>
+    :root {
+      --bg:      #06090f;
+      --surf:    #0c1220;
+      --card:    #101827;
+      --card2:   #0e1523;
+      --bdr:     #1a2640;
+      --bdr2:    #243350;
+      --bull:    #00d97e;
+      --bullDim: #00d97e1a;
+      --bear:    #f0485a;
+      --bearDim: #f0485a1a;
+      --warn:    #f5a623;
+      --warnDim: #f5a6231a;
+      --text:    #ccd6f0;
+      --muted:   #3d5070;
+      --ml:      #7c9cc8;
+      --purple:  #a78bfa;
+      --purpleDim: #a78bfa1a;
+    }
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; min-height:100vh; }
+
+    /* ── Header ── */
+    .hdr { background:var(--surf); border-bottom:1px solid var(--bdr); padding:13px 24px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; position:sticky; top:0; z-index:100; }
+    .hdr-logo { width:34px; height:34px; border-radius:9px; flex-shrink:0; background:linear-gradient(135deg,#a78bfa,#ec4899); display:flex; align-items:center; justify-content:center; font-size:16px; }
+    .hdr-title { font-size:15px; font-weight:700; }
+    .hdr-sub   { font-size:10px; color:var(--muted); margin-top:1px; }
+    .hdr-right { margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .btn { padding:7px 14px; background:var(--card); border:1px solid var(--bdr); color:var(--text); border-radius:8px; cursor:pointer; font-size:12px; font-weight:600; transition:background .15s; white-space:nowrap; }
+    .btn:hover { background:var(--bdr); }
+    .btn:disabled { opacity:.4; cursor:not-allowed; }
+    .btn.run { background:#a78bfa22; border-color:#a78bfa55; color:var(--purple); }
+    .btn.run:hover { background:#a78bfa33; }
+    .btn.active-seg { background:var(--bdr2); color:var(--text); }
+
+    /* ── Tool Nav ── */
+    .tool-nav { background:var(--surf); border-bottom:1px solid var(--bdr); padding:0 22px; display:flex; align-items:center; gap:4px; position:sticky; top:57px; z-index:99; overflow-x:auto; }
+    .tool-nav::-webkit-scrollbar { display:none; }
+    .tnav-item { display:flex; align-items:center; gap:7px; padding:10px 16px; font-size:12px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; text-decoration:none; white-space:nowrap; transition:color .15s; flex-shrink:0; }
+    .tnav-item:hover { color:var(--text); }
+    .tnav-item.active { color:var(--text); border-bottom-color:var(--purple); }
+    .tnav-sep { width:1px; height:18px; background:var(--bdr); flex-shrink:0; margin:0 4px; }
+
+    /* ── Main ── */
+    .main { padding:22px 24px; max-width:1300px; margin:0 auto; }
+    .section-title { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--muted); margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+
+    /* ── Bot Selector ── */
+    .bot-seg { display:flex; gap:4px; background:var(--card); border:1px solid var(--bdr); border-radius:10px; padding:4px; margin-bottom:20px; width:fit-content; }
+    .seg-btn { padding:8px 20px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--muted); transition:all .15s; }
+    .seg-btn.active { background:var(--bdr2); color:var(--text); }
+
+    /* ── Summary strip ── */
+    .summary-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:20px; }
+    .sum-card { background:var(--card); border:1px solid var(--bdr); border-radius:10px; padding:13px 15px; }
+    .sum-label { font-size:10px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+    .sum-val   { font-size:20px; font-weight:800; line-height:1; }
+    .sum-sub   { font-size:10px; color:var(--muted); margin-top:3px; }
+
+    /* ── Loss categories ── */
+    .cat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:20px; }
+    .cat-card { background:var(--card); border:1px solid var(--bdr); border-radius:12px; padding:16px 18px; }
+    .cat-top  { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .cat-name { font-size:12px; font-weight:700; }
+    .cat-cnt  { font-size:18px; font-weight:800; }
+    .cat-pct  { font-size:11px; color:var(--muted); margin-bottom:10px; }
+    .cat-bar  { height:5px; background:var(--bdr); border-radius:3px; }
+    .cat-fill { height:100%; border-radius:3px; }
+    .cat-tip  { font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; }
+
+    /* ── Suggestions ── */
+    .sug-card { background:var(--card); border:1px solid var(--bdr); border-radius:12px; padding:18px 20px; margin-bottom:20px; }
+    .sug-row  { display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--bdr); font-size:12px; line-height:1.6; }
+    .sug-row:last-child { border-bottom:none; }
+    .sug-icon { font-size:16px; flex-shrink:0; margin-top:1px; }
+    .sug-body strong { color:var(--text); }
+    .sug-body { color:var(--muted); }
+
+    /* ── Parameter Lab ── */
+    .lab-card { background:var(--card); border:1px solid var(--bdr); border-radius:12px; padding:18px 20px; margin-bottom:20px; }
+    .lab-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; margin-bottom:18px; }
+    .param-row { display:flex; flex-direction:column; gap:6px; }
+    .param-label { display:flex; justify-content:space-between; font-size:11px; }
+    .param-name { color:var(--muted); font-weight:600; }
+    .param-val  { color:var(--text); font-weight:700; font-size:12px; }
+    input[type=range] { width:100%; accent-color:var(--purple); height:4px; cursor:pointer; }
+    .lab-compare { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .cmp-col { background:var(--card2); border:1px solid var(--bdr); border-radius:10px; padding:14px 16px; }
+    .cmp-title { font-size:10px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
+    .cmp-row { display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid var(--bdr); font-size:12px; }
+    .cmp-row:last-child { border-bottom:none; }
+    .cmp-name  { color:var(--muted); }
+    .delta-pos { color:var(--bull); font-weight:700; font-size:11px; }
+    .delta-neg { color:var(--bear); font-weight:700; font-size:11px; }
+    .delta-neu { color:var(--muted); font-size:11px; }
+
+    /* ── Loss Table ── */
+    .loss-card { background:var(--card); border:1px solid var(--bdr); border-radius:12px; overflow:hidden; margin-bottom:20px; }
+    .loss-head { padding:13px 20px; border-bottom:1px solid var(--bdr); display:flex; align-items:center; justify-content:space-between; }
+    table { width:100%; border-collapse:collapse; font-size:11.5px; }
+    th { padding:8px 14px; text-align:left; font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--bdr); background:var(--card2); white-space:nowrap; }
+    td { padding:8px 14px; border-bottom:1px solid var(--bdr); vertical-align:middle; }
+    tr:last-child td { border-bottom:none; }
+    tr:hover td { background:#ffffff03; }
+    .badge { padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; white-space:nowrap; }
+    .b-tight  { background:#f59e0b22; color:#fcd34d; }
+    .b-whip   { background:#a78bfa22; color:var(--purple); }
+    .b-drain  { background:#3b82f622; color:#7cb8ff; }
+    .b-normal { background:var(--bearDim); color:var(--bear); }
+    .b-long   { background:var(--bullDim); color:var(--bull); border:1px solid #00d97e33; }
+    .b-short  { background:var(--bearDim); color:var(--bear); border:1px solid #f0485a33; }
+
+    /* ── Journal ── */
+    .journal-card { background:var(--card); border:1px solid var(--bdr); border-radius:12px; padding:18px 20px; margin-bottom:20px; }
+    .journal-input-wrap { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
+    .journal-date { font-size:11px; color:var(--muted); margin-bottom:2px; }
+    textarea {
+      width:100%; background:var(--surf); border:1px solid var(--bdr2); color:var(--text);
+      border-radius:10px; padding:12px 14px; font-size:13px; font-family:inherit;
+      resize:vertical; min-height:90px; outline:none; line-height:1.6;
+      transition:border-color .15s;
+    }
+    textarea:focus { border-color:var(--purple); }
+    textarea::placeholder { color:var(--muted); }
+    .journal-actions { display:flex; gap:8px; align-items:center; }
+    .btn-save { background:var(--purple); color:#fff; border:none; padding:8px 18px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; transition:opacity .15s; }
+    .btn-save:hover { opacity:.85; }
+    .journal-entries { display:flex; flex-direction:column; gap:10px; }
+    .j-entry { background:var(--card2); border:1px solid var(--bdr); border-radius:10px; padding:13px 16px; }
+    .j-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .j-date  { font-size:11px; font-weight:700; color:var(--purple); }
+    .j-stats { font-size:10px; color:var(--muted); }
+    .j-text  { font-size:12px; color:var(--text); line-height:1.65; white-space:pre-wrap; }
+    .j-delete { font-size:11px; color:var(--muted); cursor:pointer; padding:2px 6px; border-radius:4px; }
+    .j-delete:hover { background:var(--bearDim); color:var(--bear); }
+    .j-empty { padding:24px; text-align:center; color:var(--muted); font-size:13px; }
+
+    /* ── Loading ── */
+    .loading { text-align:center; padding:60px 24px; color:var(--muted); }
+    .spinner { width:34px; height:34px; border:3px solid var(--bdr); border-top-color:var(--purple); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 14px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* ── Footer ── */
+    .footer { text-align:center; color:var(--muted); font-size:11px; padding:18px; border-top:1px solid var(--bdr); line-height:1.9; }
+
+    @media(max-width:640px) { .main { padding:14px; } .lab-compare { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-logo">📓</div>
+  <div>
+    <div class="hdr-title">Trade Review & Training Journal</div>
+    <div class="hdr-sub">Analyze losses · Tune parameters · Log daily observations</div>
+  </div>
+  <div class="hdr-right">
+    <button class="btn run" id="runBtn" onclick="runReview()">▶ Load & Analyze</button>
+  </div>
+</header>
+
+<nav class="tool-nav">
+  <a class="tnav-item" href="index.html"><span>📡</span> Dashboard</a>
+  <div class="tnav-sep"></div>
+  <a class="tnav-item" href="backtest.html"><span>📈</span> Daily Bot</a>
+  <div class="tnav-sep"></div>
+  <a class="tnav-item" href="scalp_backtest.html"><span>⚡</span> Scalp Bot</a>
+  <div class="tnav-sep"></div>
+  <a class="tnav-item active" href="trade_review.html"><span>📓</span> Training Journal</a>
+</nav>
+
+<main class="main">
+
+  <!-- Bot selector -->
+  <div class="bot-seg">
+    <button class="seg-btn active" id="seg-scalp" onclick="selectBot('scalp')">⚡ Scalp Bot (15m)</button>
+    <button class="seg-btn"        id="seg-daily" onclick="selectBot('daily')">📈 Daily Bot (1D)</button>
+  </div>
+
+  <div id="app">
+    <div class="loading">
+      <div class="spinner"></div>
+      <div>Click <strong style="color:var(--purple)">▶ Load & Analyze</strong> to fetch data and review your trades</div>
+    </div>
+  </div>
+
+  <!-- Journal always visible -->
+  <div class="journal-card" style="margin-top:8px">
+    <div class="section-title">📓 Daily Training Journal</div>
+    <div class="journal-input-wrap">
+      <div class="journal-date" id="journalDate"></div>
+      <textarea id="journalText" placeholder="What did you observe today? Which trades lost and why? What filter could prevent that loss next time?&#10;&#10;e.g. 'Scalp losses mostly occurred when BTC was within 0.5% of the 200 SMA — price was indecisive at that level. Try adding a filter: skip entries within 0.3% of the Money Line.'"
+      ></textarea>
+      <div class="journal-actions">
+        <button class="btn-save" onclick="saveJournalEntry()">💾 Save Entry</button>
+        <span style="font-size:11px;color:var(--muted)" id="journalSaved"></span>
+      </div>
+    </div>
+    <div id="journalEntries"><div class="j-empty">No entries yet — write your first observation after reviewing today's trades.</div></div>
+  </div>
+
+</main>
+
+<footer class="footer">
+  Training loop: Run → Review losses → Identify pattern → Adjust params → Re-run → Log observations<br>
+  Journal entries are saved locally in your browser · Data via Bybit
+</footer>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONFIG & STATE
+// ═══════════════════════════════════════════════════════════════
+const BYBIT_URL = 'https://api.bybit.com/v5/market/kline';
+let currentBot  = 'scalp';
+let lastResults = null;
+
+const DEFAULT_PARAMS = {
+  scalp: { riskPct:0.01, maxHold:12, stopBuffer:0.001, momentumThresh:0.35, minStop:0.001, maxStop:0.08, rrTarget:2.0 },
+  daily: { riskPct:0.01, maxHold:30, stopBuffer:0.002, minStop:0.005, maxStop:0.15 },
+};
+let customParams = JSON.parse(JSON.stringify(DEFAULT_PARAMS));
+
+// ═══════════════════════════════════════════════════════════════
+//  FETCH
+// ═══════════════════════════════════════════════════════════════
+async function fetchBTCDaily() {
+  const url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=D&limit=1000`;
+  const r   = await fetch(url);
+  const d   = await r.json();
+  if (d.retCode !== 0) throw new Error(d.retMsg);
+  return d.result.list.slice().reverse().map(c => ({ ts:+c[0], open:+c[1], high:+c[2], low:+c[3], close:+c[4] }));
+}
+
+async function fetchBTC15m() {
+  const all = [];
+  let endTime = null;
+  for (let p = 0; p < 4; p++) {
+    let url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=15&limit=1000`;
+    if (endTime) url += `&end=${endTime}`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.retCode !== 0) throw new Error(d.retMsg);
+    const batch = d.result.list;
+    if (!batch.length) break;
+    all.unshift(...batch.slice().reverse().map(c => ({ ts:+c[0], open:+c[1], high:+c[2], low:+c[3], close:+c[4] })));
+    endTime = +batch[batch.length-1][0] - 1;
+    if (batch.length < 1000) break;
+    if (p < 3) await new Promise(r => setTimeout(r, 200));
+  }
+  return all.slice(-4000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ZONE COMPUTATION (shared)
+// ═══════════════════════════════════════════════════════════════
+function computeZones(candles) {
+  const c = candles.map(x => x.close), n = c.length;
+  const k = 2/22;
+  const e21 = new Array(n).fill(null);
+  e21[20] = c.slice(0,21).reduce((a,b)=>a+b,0)/21;
+  for (let i=21;i<n;i++) e21[i] = c[i]*k + e21[i-1]*(1-k);
+  const s20 = new Array(n).fill(null);
+  let s = c.slice(0,20).reduce((a,b)=>a+b,0);
+  for (let i=19;i<n;i++) { if(i>19){s+=c[i];s-=c[i-20];} s20[i]=s/20; }
+  const s200 = new Array(n).fill(null);
+  let s2=0;
+  for (let i=0;i<n;i++) { s2+=c[i]; if(i>=200)s2-=c[i-200]; s200[i]=s2/Math.min(i+1,200); }
+  const zones = [];
+  for (let i=21;i<n;i++) {
+    const hi=Math.max(s20[i],e21[i]), lo=Math.min(s20[i],e21[i]);
+    zones.push({ i, price:c[i], hi, lo, sma200:s200[i], candle:candles[i], zone: c[i]>hi?'bull':c[i]<lo?'bear':'support' });
+  }
+  return zones;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BACKTEST ENGINES
+// ═══════════════════════════════════════════════════════════════
+function runScalpBacktest(zoneData, p) {
+  const { riskPct, maxHold, stopBuffer, momentumThresh, minStop, maxStop, rrTarget } = p;
+  let capital = 1000; const trades = [], tradeCnt = {};
+  let pos = null;
+  const dayKey = ts => new Date(ts).toISOString().slice(0,10);
+  const isMom = (c, dir) => {
+    const r = c.high - c.low; if (r < 0.0001) return false;
+    const pos2 = (c.close - c.low) / r;
+    return dir === 'long' ? pos2 >= (1 - momentumThresh) : pos2 <= momentumThresh;
+  };
+  for (let idx=1; idx<zoneData.length; idx++) {
+    const curr=zoneData[idx], prev=zoneData[idx-1], dk=dayKey(curr.candle.ts);
+    if (pos) {
+      let exitPx=null, exitWhy=null;
+      if (pos.dir==='long') {
+        if (curr.candle.high>=pos.tpPx){exitPx=pos.tpPx;exitWhy='TP 2:1';}
+        else if (curr.candle.low<=pos.slPx){exitPx=pos.slPx;exitWhy='Stop Loss';}
+        else if (idx-pos.entryIdx>=maxHold){exitPx=curr.price;exitWhy='Time Stop';}
+      } else {
+        if (curr.candle.low<=pos.tpPx){exitPx=pos.tpPx;exitWhy='TP 2:1';}
+        else if (curr.candle.high>=pos.slPx){exitPx=pos.slPx;exitWhy='Stop Loss';}
+        else if (idx-pos.entryIdx>=maxHold){exitPx=curr.price;exitWhy='Time Stop';}
+      }
+      if (exitPx!==null) {
+        const pnl = pos.dir==='long' ? (exitPx-pos.entryPrice)*pos.qty : (pos.entryPrice-exitPx)*pos.qty;
+        capital = Math.max(0, capital+pnl);
+        trades.push({ dir:pos.dir, entryTs:zoneData[pos.entryIdx].candle.ts, exitTs:curr.candle.ts, entryPrice:pos.entryPrice, exitPrice:exitPx, slPx:pos.slPx, tpPx:pos.tpPx, exitWhy, pnl, duration:idx-pos.entryIdx, riskAmt:pos.riskAmt });
+        pos = null;
+      }
+    }
+    if (!pos) {
+      const cnt = tradeCnt[dk]||0;
+      if (cnt < 3) {
+        const freshBull = curr.zone==='bull' && prev.zone!=='bull';
+        const freshBear = curr.zone==='bear' && prev.zone!=='bear';
+        const dir = (freshBull && curr.price>curr.sma200 && isMom(curr.candle,'long')) ? 'long'
+                  : (freshBear && curr.price<curr.sma200 && isMom(curr.candle,'short')) ? 'short' : null;
+        if (dir) {
+          const riskAmt=capital*riskPct;
+          const slPx = dir==='long' ? curr.lo*(1-stopBuffer) : curr.hi*(1+stopBuffer);
+          const stopDist = Math.abs(curr.price - slPx);
+          const stopPct = stopDist/curr.price;
+          if (stopPct>=minStop && stopPct<=maxStop) {
+            const qty = (riskAmt/stopPct)/curr.price;
+            const tpPx = dir==='long' ? curr.price+stopDist*rrTarget : curr.price-stopDist*rrTarget;
+            pos = { dir, entryPrice:curr.price, slPx, tpPx, qty, riskAmt, entryCapital:capital, entryIdx:idx };
+            tradeCnt[dk] = cnt+1;
+          }
+        }
+      }
+    }
+  }
+  return { trades, finalCapital: capital };
+}
+
+function runDailyBacktest(zoneData, p) {
+  const { riskPct, maxHold, stopBuffer, minStop, maxStop } = p;
+  let capital=1000; const trades=[];
+  let pos=null;
+  for (let idx=1; idx<zoneData.length; idx++) {
+    const curr=zoneData[idx], prev=zoneData[idx-1];
+    if (pos) {
+      let exitPx=null, exitWhy=null;
+      if (curr.candle.low<=pos.stopPx){exitPx=pos.stopPx;exitWhy='Stop Loss';}
+      else if (curr.zone==='bear'){exitPx=curr.price;exitWhy='Bear Zone';}
+      else if (idx-pos.entryIdx>=maxHold){exitPx=curr.price;exitWhy='Max Hold';}
+      else if (curr.zone==='support'&&prev.zone==='bull'&&!pos.trailed){pos.stopPx=Math.max(pos.stopPx,pos.entryPrice*0.9985);pos.trailed=true;}
+      if (exitPx!==null) {
+        const pnl=(exitPx-pos.entryPrice)*pos.qty;
+        capital=Math.max(0,capital+pnl);
+        trades.push({ dir:'long', entryTs:zoneData[pos.entryIdx].candle.ts, exitTs:curr.candle.ts, entryPrice:pos.entryPrice, exitPrice:exitPx, slPx:pos.stopPx, tpPx:null, exitWhy, pnl, duration:idx-pos.entryIdx, riskAmt:pos.riskAmt });
+        pos=null;
+      }
+    }
+    if (!pos) {
+      const freshBull=curr.zone==='bull'&&prev.zone!=='bull', aboveML=curr.price>curr.sma200;
+      if (freshBull&&aboveML) {
+        const riskAmt=capital*riskPct, stopPx=curr.lo*(1-stopBuffer);
+        const stopPct=(curr.price-stopPx)/curr.price;
+        if (stopPct>=minStop&&stopPct<=maxStop) {
+          const qty=(riskAmt/stopPct)/curr.price;
+          pos={entryPrice:curr.price,stopPx,qty,riskAmt,entryCapital:capital,entryIdx:idx,trailed:false};
+        }
+      }
+    }
+  }
+  return { trades, finalCapital: capital };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOSS CATEGORISATION
+// ═══════════════════════════════════════════════════════════════
+function categorize(t) {
+  if (t.pnl >= 0) return null;
+  if (t.exitWhy === 'Stop Loss' && t.duration <= 2)  return 'tight-stop';
+  if (t.duration <= 3 && t.exitWhy !== 'Stop Loss' && t.exitWhy !== 'TP 2:1') return 'whipsaw';
+  if (t.exitWhy === 'Time Stop' || t.exitWhy === 'Max Hold') return 'time-drain';
+  return 'normal';
+}
+
+const CAT_META = {
+  'tight-stop': { label:'Tight Stop',  color:'#fcd34d', cls:'b-tight',  tip:'Stop hit in ≤2 candles then price reversed. Stop placed too close to entry — try widening the stop buffer or filtering out low-volatility zones.' },
+  'whipsaw':    { label:'Whipsaw',     color:'var(--purple)', cls:'b-whip',  tip:'Zone flipped back within 3 candles. False break — the cross had no follow-through. Try requiring the momentum filter to be stricter, or add a 1-candle confirmation delay.' },
+  'time-drain': { label:'Time Drain',  color:'#7cb8ff', cls:'b-drain', tip:'Neither TP nor SL hit before time stop. Price went sideways. Consider reducing max hold or filtering out entries when volatility is low (e.g. F&G near 50).' },
+  'normal':     { label:'Normal Loss', color:'var(--bear)',   cls:'b-normal', tip:'Clean loss — price moved against the trade with conviction. These are expected in any strategy. Focus on reducing the other three categories first.' },
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  SUGGESTIONS (auto-generated)
+// ═══════════════════════════════════════════════════════════════
+function generateSuggestions(cats, totalLosses) {
+  if (!totalLosses) return '<div class="sug-row"><span class="sug-icon">🎉</span><div class="sug-body"><strong>No losses to analyse.</strong> Try a different time period or re-run with more candles.</div></div>';
+
+  const pct = key => cats[key] ? (cats[key] / totalLosses * 100) : 0;
+  const rows = [];
+
+  if (pct('tight-stop') >= 25)
+    rows.push({ icon:'🔧', text:`<strong>${pct('tight-stop').toFixed(0)}% of losses are Tight Stops.</strong> Increase the stop buffer from <code>${currentBot==='scalp'?'0.1%':'0.2%'}</code> to <code>${currentBot==='scalp'?'0.2%':'0.35%'}</code> in the Parameter Lab and re-run to see the impact.` });
+
+  if (pct('whipsaw') >= 25)
+    rows.push({ icon:'🌀', text:`<strong>${pct('whipsaw').toFixed(0)}% of losses are Whipsaws.</strong> Tighten the Momentum Threshold so only stronger candles qualify. Try raising it from <code>35%</code> to <code>45%</code> in the Parameter Lab.` });
+
+  if (pct('time-drain') >= 30)
+    rows.push({ icon:'⏱', text:`<strong>${pct('time-drain').toFixed(0)}% of losses are Time Drains.</strong> The bot is entering during choppy, directionless markets. Try reducing Max Hold from <code>${currentBot==='scalp'?12:30}</code> to <code>${currentBot==='scalp'?8:20}</code> candles and observe trade count impact.` });
+
+  if (pct('normal') >= 60)
+    rows.push({ icon:'📊', text:`<strong>Most losses (${pct('normal').toFixed(0)}%) are clean directional losses</strong> — the market moved against the trade with conviction. This is healthy. Focus on win rate and R:R rather than trying to eliminate these. Consider increasing the R:R target slightly.` });
+
+  if (rows.length === 0)
+    rows.push({ icon:'✅', text:`<strong>Loss distribution looks balanced.</strong> No single category dominates. Keep logging observations and watch for patterns developing over more trading days.` });
+
+  // General tips
+  rows.push({ icon:'💡', text:`<strong>Training tip:</strong> After adjusting parameters in the lab below, compare the new profit factor and win rate. A good adjustment should improve profit factor without drastically reducing trade count.` });
+  rows.push({ icon:'📓', text:`<strong>Journal tip:</strong> Record specific trades that surprised you. Note the market context (was BTC near a key level? Was there news?). Patterns you notice manually often become the next filter.` });
+
+  return rows.map(r => `<div class="sug-row"><span class="sug-icon">${r.icon}</span><div class="sug-body">${r.text}</div></div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FORMAT
+// ═══════════════════════════════════════════════════════════════
+const fp   = n => Math.abs(n)>=10000 ? '$'+n.toLocaleString('en-US',{maximumFractionDigits:0}) : Math.abs(n)>=100 ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '$'+n.toFixed(2);
+const fDT  = ts => new Date(ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'UTC'})+' UTC';
+const clr  = v  => v>=0 ? 'var(--bull)' : 'var(--bear)';
+const pctS = v  => (v>=0?'+':'')+v.toFixed(2)+'%';
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDER RESULTS
+// ═══════════════════════════════════════════════════════════════
+function renderResults(trades, finalCapital, isCustom = false) {
+  const closed = trades.filter(t => !t.isOpen);
+  const wins   = closed.filter(t => t.pnl > 0);
+  const losses = closed.filter(t => t.pnl <= 0);
+  const winRate = closed.length ? wins.length/closed.length*100 : 0;
+  const grossW  = wins.reduce((s,t)=>s+t.pnl,0);
+  const grossL  = Math.abs(losses.reduce((s,t)=>s+t.pnl,0));
+  const pf      = grossL>0 ? grossW/grossL : Infinity;
+  const ret     = (finalCapital-1000)/1000*100;
+
+  // Categorise losses
+  const cats = {};
+  losses.forEach(t => { const c=categorize(t); if(c){cats[c]=(cats[c]||0)+1;} });
+  const totalLossCnt = losses.length;
+
+  if (isCustom) {
+    // Return stats object for comparison
+    return { finalCapital, winRate, pf, ret, trades: closed.length };
+  }
+
+  // Summary strip
+  const summaryHtml = `
+    <div class="summary-strip">
+      <div class="sum-card">
+        <div class="sum-label">Capital</div>
+        <div class="sum-val" style="color:${clr(ret)}">${fp(finalCapital)}</div>
+        <div class="sum-sub" style="color:${clr(ret)}">${pctS(ret)}</div>
+      </div>
+      <div class="sum-card">
+        <div class="sum-label">Win Rate</div>
+        <div class="sum-val" style="color:${winRate>=55?'var(--bull)':winRate>=40?'var(--warn)':'var(--bear)'}">${winRate.toFixed(0)}%</div>
+        <div class="sum-sub">${wins.length}W · ${losses.length}L</div>
+      </div>
+      <div class="sum-card">
+        <div class="sum-label">Profit Factor</div>
+        <div class="sum-val" style="color:${pf>=1.5?'var(--bull)':pf>=1?'var(--warn)':'var(--bear)'}">${isFinite(pf)?pf.toFixed(2):'∞'}</div>
+        <div class="sum-sub">Wins ÷ Losses</div>
+      </div>
+      <div class="sum-card">
+        <div class="sum-label">Total Trades</div>
+        <div class="sum-val">${closed.length}</div>
+        <div class="sum-sub">${totalLossCnt} losses to review</div>
+      </div>
+    </div>`;
+
+  // Category cards
+  const catOrder = ['tight-stop','whipsaw','time-drain','normal'];
+  const catHtml = `
+    <div class="section-title">🔬 Loss Breakdown — What's costing the bot money?</div>
+    <div class="cat-grid">
+      ${catOrder.map(key => {
+        const m = CAT_META[key];
+        const cnt = cats[key] || 0;
+        const pct = totalLossCnt > 0 ? cnt/totalLossCnt*100 : 0;
+        return `<div class="cat-card">
+          <div class="cat-top">
+            <span class="cat-name" style="color:${m.color}">${m.label}</span>
+            <span class="cat-cnt" style="color:${m.color}">${cnt}</span>
+          </div>
+          <div class="cat-pct">${pct.toFixed(0)}% of all losses</div>
+          <div class="cat-bar"><div class="cat-fill" style="width:${pct}%;background:${m.color}"></div></div>
+          <div class="cat-tip">${m.tip}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  // Suggestions
+  const sugHtml = `
+    <div class="sug-card">
+      <div class="section-title">💡 Auto-Generated Improvement Suggestions</div>
+      ${generateSuggestions(cats, totalLossCnt)}
+    </div>`;
+
+  // Parameter Lab
+  const p  = customParams[currentBot];
+  const pd = DEFAULT_PARAMS[currentBot];
+  const labHtml = currentBot === 'scalp' ? `
+    <div class="lab-card">
+      <div class="section-title">🧪 Parameter Lab — Adjust & Re-test</div>
+      <div class="lab-grid">
+        ${makeSlider('riskPct','Risk per Trade %', p.riskPct, 0.005, 0.03, 0.005, v=>(v*100).toFixed(1)+'%')}
+        ${makeSlider('maxHold','Max Hold (candles)', p.maxHold, 4, 24, 1, v=>v+' ('+v*15+'min)')}
+        ${makeSlider('stopBuffer','Stop Buffer %', p.stopBuffer, 0.0005, 0.005, 0.0005, v=>(v*100).toFixed(2)+'%')}
+        ${makeSlider('momentumThresh','Momentum Threshold', p.momentumThresh, 0.2, 0.6, 0.05, v=>(v*100).toFixed(0)+'%')}
+        ${makeSlider('rrTarget','R:R Target', p.rrTarget, 1.5, 4, 0.5, v=>v.toFixed(1)+':1')}
+      </div>
+      <div style="margin-bottom:14px">
+        <button class="btn run" onclick="runComparison()">🔁 Compare with original</button>
+        <button class="btn" onclick="resetParams()" style="margin-left:6px">↺ Reset defaults</button>
+      </div>
+      <div id="compareWrap" style="display:none">
+        <div class="lab-compare" id="compareGrid"></div>
+      </div>
+    </div>` : `
+    <div class="lab-card">
+      <div class="section-title">🧪 Parameter Lab — Adjust & Re-test</div>
+      <div class="lab-grid">
+        ${makeSlider('riskPct','Risk per Trade %', p.riskPct, 0.005, 0.03, 0.005, v=>(v*100).toFixed(1)+'%')}
+        ${makeSlider('maxHold','Max Hold (days)', p.maxHold, 7, 60, 1, v=>v+' days')}
+        ${makeSlider('stopBuffer','Stop Buffer %', p.stopBuffer, 0.001, 0.01, 0.001, v=>(v*100).toFixed(2)+'%')}
+      </div>
+      <div style="margin-bottom:14px">
+        <button class="btn run" onclick="runComparison()">🔁 Compare with original</button>
+        <button class="btn" onclick="resetParams()" style="margin-left:6px">↺ Reset defaults</button>
+      </div>
+      <div id="compareWrap" style="display:none">
+        <div class="lab-compare" id="compareGrid"></div>
+      </div>
+    </div>`;
+
+  // Loss trade table (losses only, newest first)
+  const lossRows = [...losses].reverse().slice(0, 50).map((t, i) => {
+    const cat  = categorize(t);
+    const meta = cat ? CAT_META[cat] : null;
+    const dirCls = t.dir === 'long' ? 'b-long' : 'b-short';
+    return `<tr>
+      <td style="color:var(--muted)">#${i+1}</td>
+      <td><span class="badge ${dirCls}">${t.dir==='long'?'▲ Long':'▼ Short'}</span></td>
+      <td>${fDT(t.entryTs)}</td>
+      <td>${fp(t.entryPrice)}</td>
+      <td style="font-weight:700;color:var(--bear)">${fp(t.pnl)}</td>
+      <td>${t.duration} ${currentBot==='scalp'?'cnds':'days'}</td>
+      <td>${t.exitWhy}</td>
+      <td>${meta ? `<span class="badge ${meta.cls}">${meta.label}</span>` : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const lossTableHtml = `
+    <div class="loss-card">
+      <div class="loss-head">
+        <div class="section-title" style="margin:0">❌ Losing Trades (last 50)</div>
+        <span style="font-size:11px;color:var(--muted)">${losses.length} total losses</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>#</th><th>Dir</th><th>Entry (UTC)</th><th>Entry $</th><th>P&L</th><th>Duration</th><th>Exit</th><th>Category</th></tr></thead>
+          <tbody>${lossRows || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No losing trades found</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // Pre-fill journal with today's stats for quick note-taking
+  const jt = document.getElementById('journalText');
+  if (jt && !jt.value) {
+    jt.value = `[Auto summary — ${new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}]\n`
+      + `Bot: ${currentBot === 'scalp' ? '⚡ Scalp (15m)' : '📈 Daily (1D)'} | `
+      + `Win rate: ${winRate.toFixed(0)}% | PF: ${isFinite(pf)?pf.toFixed(2):'∞'} | Capital: ${fp(finalCapital)}\n\n`
+      + `Observations:\n`;
+  }
+
+  document.getElementById('app').innerHTML = summaryHtml + catHtml + sugHtml + labHtml + lossTableHtml;
+
+  // Store for comparison
+  lastResults = { trades, finalCapital };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PARAMETER SLIDERS
+// ═══════════════════════════════════════════════════════════════
+function makeSlider(key, label, val, min, max, step, fmt) {
+  return `<div class="param-row">
+    <div class="param-label">
+      <span class="param-name">${label}</span>
+      <span class="param-val" id="pv-${key}">${fmt(val)}</span>
+    </div>
+    <input type="range" min="${min}" max="${max}" step="${step}" value="${val}"
+      oninput="updateParam('${key}', +this.value, v=>'${fmt}'.replace('v', v))"
+      onchange="updateParam('${key}', +this.value)"
+    />
+  </div>`;
+}
+
+function updateParam(key, val) {
+  customParams[currentBot][key] = val;
+  // Update display label
+  const el = document.getElementById(`pv-${key}`);
+  if (el) {
+    const fmt = {
+      riskPct: v => (v*100).toFixed(1)+'%',
+      maxHold: v => currentBot==='scalp' ? v+' ('+v*15+'min)' : v+' days',
+      stopBuffer: v => (v*100).toFixed(2)+'%',
+      momentumThresh: v => (v*100).toFixed(0)+'%',
+      rrTarget: v => v.toFixed(1)+':1',
+    };
+    if (fmt[key]) el.textContent = fmt[key](val);
+  }
+}
+
+function resetParams() {
+  customParams[currentBot] = JSON.parse(JSON.stringify(DEFAULT_PARAMS[currentBot]));
+  runReview();
+}
+
+async function runComparison() {
+  if (!lastResults) return;
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ Running…';
+
+  try {
+    const p  = customParams[currentBot];
+    const zoneData = lastResults._zoneData;
+    if (!zoneData) { btn.textContent = '🔁 Compare with original'; btn.disabled = false; return; }
+
+    const { trades: newTrades, finalCapital: newCap } = currentBot === 'scalp'
+      ? runScalpBacktest(zoneData, p)
+      : runDailyBacktest(zoneData, p);
+
+    const orig = lastResults;
+    const origClosed = orig.trades.filter(t=>!t.isOpen);
+    const origWins   = origClosed.filter(t=>t.pnl>0);
+    const origPF     = (() => { const gW=origWins.reduce((s,t)=>s+t.pnl,0), gL=Math.abs(origClosed.filter(t=>t.pnl<=0).reduce((s,t)=>s+t.pnl,0)); return gL>0?gW/gL:Infinity; })();
+
+    const newClosed = newTrades.filter(t=>!t.isOpen);
+    const newWins   = newClosed.filter(t=>t.pnl>0);
+    const newPF     = (() => { const gW=newWins.reduce((s,t)=>s+t.pnl,0), gL=Math.abs(newClosed.filter(t=>t.pnl<=0).reduce((s,t)=>s+t.pnl,0)); return gL>0?gW/gL:Infinity; })();
+
+    const origWR = origClosed.length ? origWins.length/origClosed.length*100 : 0;
+    const newWR  = newClosed.length  ? newWins.length/newClosed.length*100   : 0;
+    const origRet = (orig.finalCapital-1000)/1000*100;
+    const newRet  = (newCap-1000)/1000*100;
+
+    const delta = (a, b, higherBetter=true) => {
+      const d = b - a, good = higherBetter ? d >= 0 : d <= 0;
+      const cls = Math.abs(d) < 0.01 ? 'delta-neu' : good ? 'delta-pos' : 'delta-neg';
+      return `<span class="${cls}">${d>=0?'+':''}${typeof a==='number'&&a<10?d.toFixed(2):d.toFixed(1)}</span>`;
+    };
+
+    const metrics = [
+      ['Final Capital', fp(orig.finalCapital), fp(newCap), delta(origRet,newRet)],
+      ['Total Return',  (origRet>=0?'+':'')+origRet.toFixed(1)+'%', (newRet>=0?'+':'')+newRet.toFixed(1)+'%', delta(origRet,newRet)],
+      ['Win Rate',      origWR.toFixed(1)+'%',   newWR.toFixed(1)+'%',   delta(origWR,newWR)],
+      ['Profit Factor', isFinite(origPF)?origPF.toFixed(2):'∞', isFinite(newPF)?newPF.toFixed(2):'∞', delta(isFinite(origPF)?origPF:99,isFinite(newPF)?newPF:99)],
+      ['Trade Count',   origClosed.length+'',    newClosed.length+'',    delta(origClosed.length,newClosed.length,false)],
+    ];
+
+    document.getElementById('compareWrap').style.display = 'block';
+    document.getElementById('compareGrid').innerHTML = `
+      <div class="cmp-col">
+        <div class="cmp-title">📊 Original (Default Params)</div>
+        ${metrics.map(([label, orig]) => `<div class="cmp-row"><span class="cmp-name">${label}</span><span>${orig}</span></div>`).join('')}
+      </div>
+      <div class="cmp-col">
+        <div class="cmp-title">🧪 Custom Params &nbsp; <span style="font-weight:400;letter-spacing:0;text-transform:none;font-size:10px;color:var(--muted)">delta vs original</span></div>
+        ${metrics.map(([label, , custom, d]) => `<div class="cmp-row"><span class="cmp-name">${label}</span><span>${custom} &nbsp;${d}</span></div>`).join('')}
+      </div>`;
+  } catch(e) { console.error(e); }
+
+  btn.disabled = false; btn.textContent = '🔁 Compare with original';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  JOURNAL
+// ═══════════════════════════════════════════════════════════════
+function loadJournal() { try { return JSON.parse(localStorage.getItem('tradeJournal')||'[]'); } catch(e) { return []; } }
+function saveJournal(entries) { try { localStorage.setItem('tradeJournal', JSON.stringify(entries)); } catch(e) {} }
+
+function renderJournal() {
+  const entries = loadJournal();
+  document.getElementById('journalDate').textContent = `Today: ${new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}`;
+  const el = document.getElementById('journalEntries');
+  if (!entries.length) { el.innerHTML = '<div class="j-empty">No entries yet — write your first observation after reviewing today\'s trades.</div>'; return; }
+  el.innerHTML = [...entries].reverse().map((e, ri) => {
+    const i = entries.length - 1 - ri;
+    return `<div class="j-entry">
+      <div class="j-header">
+        <span class="j-date">${e.date}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${e.bot ? `<span class="j-stats">${e.bot}</span>` : ''}
+          ${e.stats ? `<span class="j-stats">${e.stats}</span>` : ''}
+          <span class="j-delete" onclick="deleteEntry(${i})">✕</span>
+        </div>
+      </div>
+      <div class="j-text">${e.text.replace(/</g,'&lt;')}</div>
+    </div>`;
+  }).join('');
+}
+
+function saveJournalEntry() {
+  const text = document.getElementById('journalText').value.trim();
+  if (!text) return;
+  const entries = loadJournal();
+  const entry = {
+    date: new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'}),
+    text,
+    bot: currentBot === 'scalp' ? '⚡ Scalp' : '📈 Daily',
+    ts: Date.now(),
+  };
+  entries.push(entry);
+  saveJournal(entries);
+  document.getElementById('journalText').value = '';
+  const saved = document.getElementById('journalSaved');
+  saved.textContent = '✓ Saved'; setTimeout(() => saved.textContent = '', 2000);
+  renderJournal();
+}
+
+function deleteEntry(i) {
+  if (!confirm('Delete this journal entry?')) return;
+  const entries = loadJournal();
+  entries.splice(i, 1);
+  saveJournal(entries);
+  renderJournal();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN
+// ═══════════════════════════════════════════════════════════════
+function selectBot(bot) {
+  currentBot = bot;
+  document.getElementById('seg-scalp').classList.toggle('active', bot==='scalp');
+  document.getElementById('seg-daily').classList.toggle('active', bot==='daily');
+  runReview();
+}
+
+async function runReview() {
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true; btn.textContent = '⏳ Loading…';
+  document.getElementById('app').innerHTML = `<div class="loading"><div class="spinner"></div><div>Fetching ${currentBot==='scalp'?'15min':'daily'} BTC data…</div></div>`;
+
+  try {
+    const candles   = currentBot === 'scalp' ? await fetchBTC15m() : await fetchBTCDaily();
+    const zoneData  = computeZones(candles);
+    const { trades, finalCapital } = currentBot === 'scalp'
+      ? runScalpBacktest(zoneData, DEFAULT_PARAMS.scalp)
+      : runDailyBacktest(zoneData, DEFAULT_PARAMS.daily);
+
+    lastResults = { trades, finalCapital, _zoneData: zoneData };
+    renderResults(trades, finalCapital);
+  } catch(e) {
+    document.getElementById('app').innerHTML = `<div class="loading"><div style="color:var(--bear)">${e.message}</div><div style="font-size:12px;color:var(--muted);margin-top:8px">Run via: <code style="color:var(--warn);background:#ffffff0d;padding:2px 6px;border-radius:4px">python3 -m http.server 8080</code></div></div>`;
+  }
+
+  btn.disabled = false; btn.textContent = '▶ Load & Analyze';
+}
+
+// Boot
+renderJournal();
+</script>
+</body>
+</html>
