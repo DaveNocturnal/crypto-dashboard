@@ -150,6 +150,8 @@
         <div class="rule-row"><span class="rtag rtag-bull">2</span> 15min BMSB zone freshly enters <strong>Bull</strong> (previous was Support or Bear)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bull">4</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
+        <div class="rule-row"><span class="rtag rtag-warn">5</span> Candle volume &gt; <strong>1.5× 20-bar average</strong> — institutional participation, not a wick</div>
+        <div class="rule-row"><span class="rtag rtag-ml">6</span> Entry time is <strong>London open → NY close</strong> (07:00–21:00 UTC) — Asia session blocked</div>
       </div>
       <div class="rule-col">
         <h4 style="color:var(--bear)">▼ Short Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BEAR regime</span></h4>
@@ -157,6 +159,8 @@
         <div class="rule-row"><span class="rtag rtag-bear">2</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
+        <div class="rule-row"><span class="rtag rtag-warn">5</span> Candle volume &gt; <strong>1.5× 20-bar average</strong> — institutional participation, not a wick</div>
+        <div class="rule-row"><span class="rtag rtag-ml">6</span> Entry time is <strong>London open → NY close</strong> (07:00–21:00 UTC) — Asia session blocked</div>
       </div>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px">
@@ -179,6 +183,7 @@
 
 <footer class="footer">
   Data: Bybit BTCUSDT 15min · ~4,000 candles ≈ 6 weeks · Long &amp; short trades<br>
+  Filters: Daily regime · SMA200 slope · Volume spike (1.5×) · Session (London/NY only 07:00–21:00 UTC)<br>
   Paper simulation only · Past performance does not guarantee future results
 </footer>
 
@@ -186,19 +191,27 @@
 // ═══════════════════════════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════════════════════════
-const INITIAL_CAPITAL = 1000;
-const RISK_PCT        = 0.01;    // 1% of current capital
-const RR_TARGET       = 2.0;     // 2:1 take-profit ratio
-const MAX_HOLD        = 12;      // max candles before time stop (3 hours)
-const MAX_TRADES_DAY  = 3;       // max trades per calendar day
-const STOP_BUFFER     = 0.002;   // 0.2% beyond band edge — was 0.1% (too tight)
-const MOMENTUM_THRESH = 0.35;    // candle must close in top/bottom 35% of range
-const MACRO_PERIOD    = 480;     // 480 × 15min = 5-day macro trend SMA
-const SLOPE_WINDOW    = 8;       // candles to measure SMA200 slope (2 hrs)
-const SLOPE_THRESH    = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
-const DAILY_SMA_PERIOD = 20;     // 20-day SMA for daily regime detection
-const DAILY_REGIME_PCT = 0.01;   // price must be >1% above/below SMA20 to confirm regime
-const TARGET_CANDLES  = 4000;    // ~6 weeks of 15min data
+const INITIAL_CAPITAL  = 1000;
+const RISK_PCT         = 0.01;    // 1% of current capital
+const RR_TARGET        = 2.0;     // 2:1 take-profit ratio
+const MAX_HOLD         = 12;      // max candles before time stop (3 hours)
+const MAX_TRADES_DAY   = 3;       // max trades per calendar day
+const STOP_BUFFER      = 0.002;   // 0.2% beyond band edge — was 0.1% (too tight)
+const MOMENTUM_THRESH  = 0.35;    // candle must close in top/bottom 35% of range
+const MACRO_PERIOD     = 480;     // 480 × 15min = 5-day macro trend SMA
+const SLOPE_WINDOW     = 8;       // candles to measure SMA200 slope (2 hrs)
+const SLOPE_THRESH     = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
+const DAILY_SMA_PERIOD = 20;      // 20-day SMA for daily regime detection
+const DAILY_REGIME_PCT = 0.01;    // price must be >1% above/below SMA20 to confirm regime
+const TARGET_CANDLES   = 4000;    // ~6 weeks of 15min data
+// ── Volume spike filter ─────────────────────────────────────────
+const VOL_PERIOD       = 20;      // rolling bars for average volume
+const VOL_MULT         = 1.5;     // candle volume must be > 1.5× 20-bar avg to enter
+// ── Session filter ──────────────────────────────────────────────
+// London open: 07:00 UTC → NY close: 21:00 UTC
+// Asia session (21:00–07:00 UTC) is thin, wide spreads, high whipsaw rate
+const SESSION_START    = 7;       // first UTC hour allowed (inclusive)
+const SESSION_END      = 21;      // first UTC hour blocked (exclusive)
 const BYBIT_URL       = 'https://api.bybit.com/v5/market/kline';
 
 // ═══════════════════════════════════════════════════════════════
@@ -224,13 +237,14 @@ async function fetchBTC15m() {
     const batch = d.result.list; // newest first
     if (!batch.length) break;
 
-    // Prepend chronological batch
+    // Prepend chronological batch — c[5] is base volume (BTC qty traded)
     all.unshift(...batch.slice().reverse().map(c => ({
-      ts:    +c[0],
-      open:  +c[1],
-      high:  +c[2],
-      low:   +c[3],
-      close: +c[4],
+      ts:     +c[0],
+      open:   +c[1],
+      high:   +c[2],
+      low:    +c[3],
+      close:  +c[4],
+      volume: +c[5],
     })));
 
     endTime = +batch[batch.length - 1][0] - 1; // go further back
@@ -330,6 +344,16 @@ function computeAllZones(candles) {
     if (i >= 479) s480[i] = sum480 / 480;
   }
 
+  // Rolling volume average (VOL_PERIOD bars)
+  const vols   = candles.map(c => c.volume || 0);
+  const vAvg   = new Array(n).fill(null);
+  let   vSum   = 0;
+  for (let i = 0; i < n; i++) {
+    vSum += vols[i];
+    if (i >= VOL_PERIOD) vSum -= vols[i - VOL_PERIOD];
+    if (i >= VOL_PERIOD - 1) vAvg[i] = vSum / VOL_PERIOD;
+  }
+
   const zones = [];
   for (let i = 21; i < n; i++) {
     const hi    = Math.max(s20[i], e21[i]);
@@ -340,6 +364,7 @@ function computeAllZones(candles) {
       sma200: s200[i],
       sma96:  s96[i],
       sma480: s480[i],
+      volAvg: vAvg[i],
       candle: candles[i],
       zone: price > hi ? 'bull' : price < lo ? 'bear' : 'support',
     });
@@ -358,6 +383,19 @@ function isMomentumCandle(candle, direction) {
   return direction === 'long'
     ? pos >= (1 - MOMENTUM_THRESH)   // close in top 35%
     : pos <= MOMENTUM_THRESH;         // close in bottom 35%
+}
+
+// Session filter: block Asia session (21:00–07:00 UTC) — thin market, high whipsaw
+// Allowed: London pre-open (07:00) → NY close (21:00)
+function isAllowedSession(ts) {
+  const hour = new Date(ts).getUTCHours();
+  return hour >= SESSION_START && hour < SESSION_END;
+}
+
+// Volume spike filter: candle must trade above the rolling average volume
+function isVolumeSpike(zone) {
+  if (!zone.volAvg || zone.volAvg === 0) return true; // no data → don't block
+  return zone.candle.volume >= zone.volAvg * VOL_MULT;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -452,11 +490,19 @@ function runBacktest(zoneData, dailyRegimeMap) {
         const prevSma200 = idx >= SLOPE_WINDOW ? zoneData[idx - SLOPE_WINDOW].sma200 : null;
         const isTrending = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= SLOPE_THRESH;
 
+        // Session filter: London open (07:00 UTC) → NY close (21:00 UTC)
+        const inSession  = isAllowedSession(curr.candle.ts);
+
+        // Volume filter: breakout candle must trade ≥ 1.5× 20-bar average volume
+        const highVol    = isVolumeSpike(curr);
+
         // LONG signal — only fires in bull or neutral regime
         const freshBull = curr.zone === 'bull' && prev.zone !== 'bull';
         const longOk    = freshBull
           && (regime === 'bull' || regime === 'neutral')
           && isTrending
+          && inSession
+          && highVol
           && isMomentumCandle(curr.candle, 'long');
 
         // SHORT signal — only fires in bear or neutral regime
@@ -464,6 +510,8 @@ function runBacktest(zoneData, dailyRegimeMap) {
         const shortOk   = freshBear
           && (regime === 'bear' || regime === 'neutral')
           && isTrending
+          && inSession
+          && highVol
           && isMomentumCandle(curr.candle, 'short');
 
         const dir = longOk ? 'long' : shortOk ? 'short' : null;
@@ -564,6 +612,20 @@ function calcStats(trades, finalCapital, tradeCnt) {
   const days     = Object.keys(tradeCnt).length;
   const avgPerDay= days > 0 ? closed.length / days : 0;
 
+  // Session breakdown (London 07-13 UTC, Overlap+NY 13-21 UTC)
+  const sessionOf = t => {
+    const h = new Date(t.entryTs).getUTCHours();
+    if (h >= SESSION_START && h < 13)  return 'london';
+    if (h >= 13 && h < SESSION_END)    return 'ny';
+    return 'asia';
+  };
+  const londonTrades = closed.filter(t => sessionOf(t) === 'london');
+  const nyTrades     = closed.filter(t => sessionOf(t) === 'ny');
+  const londonWR = londonTrades.length ? londonTrades.filter(t => t.pnl > 0).length / londonTrades.length * 100 : 0;
+  const nyWR     = nyTrades.length     ? nyTrades.filter(t => t.pnl > 0).length     / nyTrades.length     * 100 : 0;
+  const londonPnl = londonTrades.reduce((s, t) => s + t.pnl, 0);
+  const nyPnl     = nyTrades.reduce((s, t) => s + t.pnl, 0);
+
   return {
     totalRet:  (finalCapital - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100,
     winRate:   closed.length ? wins.length / closed.length * 100 : 0,
@@ -572,9 +634,11 @@ function calcStats(trades, finalCapital, tradeCnt) {
     avgDur:    closed.length ? closed.reduce((s, t) => s + t.duration, 0) / closed.length : 0,
     maxDD, longs: longs.length, shorts: shorts.length, longWR, shortWR,
     wins: wins.length, losses: losses.length, total: closed.length,
-    bestTrade: closed.length ? Math.max(...closed.map(t => t.pnl)) : 0,
+    bestTrade:  closed.length ? Math.max(...closed.map(t => t.pnl)) : 0,
     worstTrade: closed.length ? Math.min(...closed.map(t => t.pnl)) : 0,
     avgPerDay, days,
+    londonTrades: londonTrades.length, nyTrades: nyTrades.length,
+    londonWR, nyWR, londonPnl, nyPnl,
   };
 }
 
@@ -747,6 +811,16 @@ function renderResults(trades, equity, finalCapital, candles, tradeCnt) {
         <div class="stat-label">Best Trade</div>
         <div class="stat-val" style="color:var(--bull)">${fp(st.bestTrade)}</div>
         <div class="stat-sub">Single trade max gain</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">London Session</div>
+        <div class="stat-val" style="color:${st.londonWR>=50?'var(--bull)':st.londonWR>=33?'var(--warn)':'var(--bear)'}">${st.londonWR.toFixed(0)}% WR</div>
+        <div class="stat-sub">${st.londonTrades} trades · ${st.londonPnl>=0?'+':''}${fp(st.londonPnl)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">NY Session</div>
+        <div class="stat-val" style="color:${st.nyWR>=50?'var(--bull)':st.nyWR>=33?'var(--warn)':'var(--bear)'}">${st.nyWR.toFixed(0)}% WR</div>
+        <div class="stat-sub">${st.nyTrades} trades · ${st.nyPnl>=0?'+':''}${fp(st.nyPnl)}</div>
       </div>
     </div>`;
 
