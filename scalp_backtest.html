@@ -111,6 +111,30 @@
     /* ── Footer ── */
     .footer { text-align:center; color:var(--muted); font-size:11px; padding:18px; border-top:1px solid var(--bdr); line-height:1.9; }
 
+    /* ── Regime Debug Panel ── */
+    .debug-card { background:var(--card); border:1px solid var(--bdr); border-radius:12px; overflow:hidden; margin-bottom:20px; }
+    .debug-head { padding:12px 20px; border-bottom:1px solid var(--bdr); font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer; user-select:none; }
+    .debug-head:hover { background:var(--card2); }
+    .debug-body { overflow-x:auto; }
+    .debug-table { width:100%; border-collapse:collapse; font-size:11.5px; }
+    .debug-table th { padding:8px 14px; text-align:left; font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--bdr); background:var(--card2); white-space:nowrap; }
+    .debug-table td { padding:8px 14px; border-bottom:1px solid var(--bdr); vertical-align:middle; white-space:nowrap; }
+    .debug-table tr:last-child td { border-bottom:none; }
+    .debug-table tr:hover td { background:#ffffff03; }
+    .debug-table tr.row-silent td { opacity:.55; }
+    .regime-bull  { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; background:var(--bullDim); color:var(--bull); }
+    .regime-bear  { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; background:var(--bearDim); color:var(--bear); }
+    .regime-range { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; background:var(--warnDim); color:var(--warn); }
+    .regime-neutral { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; background:var(--bdr); color:var(--muted); }
+    .block-pill { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:600; margin:1px; }
+    .bp-regime  { background:#f5a62322; color:var(--warn); }
+    .bp-session { background:#a78bfa22; color:#c4b5fd; }
+    .bp-volume  { background:#2563eb22; color:#7cb8ff; }
+    .bp-slope   { background:#3d507022; color:var(--muted); }
+    .bp-momentum{ background:#3d507022; color:var(--muted); }
+    .bp-entered { background:var(--bullDim); color:var(--bull); }
+    .bp-none    { color:var(--muted); font-style:italic; font-size:10px; }
+
     @media(max-width:700px) { .rules-grid { grid-template-columns:1fr; } .main { padding:14px; } .hdr { padding:10px 14px; } th,td { padding:7px 10px; } }
   </style>
 </head>
@@ -284,14 +308,17 @@ async function fetchDailyRegimeMap() {
   }
 
   // Map each date to the PREVIOUS day's regime (no lookahead)
+  // Each entry: { regime, close, sma20, pct } — used for debug panel
   const map = {};
   for (let i = 1; i < n; i++) {
     if (sma20[i - 1] === null) continue;
-    const pct    = (closes[i - 1] - sma20[i - 1]) / sma20[i - 1];
-    const regime = pct >  DAILY_REGIME_PCT ? 'bull'
-                 : pct < -DAILY_REGIME_PCT ? 'bear' : 'range';
-    const dateStr = new Date(candles[i].ts).toISOString().slice(0, 10);
-    map[dateStr]  = regime;
+    const prevClose = closes[i - 1];
+    const prevSma   = sma20[i - 1];
+    const pct       = (prevClose - prevSma) / prevSma;
+    const regime    = pct >  DAILY_REGIME_PCT ? 'bull'
+                    : pct < -DAILY_REGIME_PCT ? 'bear' : 'range';
+    const dateStr   = new Date(candles[i].ts).toISOString().slice(0, 10);
+    map[dateStr]    = { regime, close: prevClose, sma20: prevSma, pct };
   }
   return map;
 }
@@ -407,6 +434,7 @@ function runBacktest(zoneData, dailyRegimeMap) {
   const equity    = [{ ts: zoneData[0].candle.ts, capital }];
   let pos         = null;
   const tradeCnt  = {};  // {dayKey: count}
+  const dailyDebug = {}; // {dayKey: { regime, close, sma20, pct, signals, entered, blocked:{...} }}
 
   for (let idx = 1; idx < zoneData.length; idx++) {
     const curr = zoneData[idx];
@@ -480,41 +508,47 @@ function runBacktest(zoneData, dailyRegimeMap) {
       if (cnt < MAX_TRADES_DAY) {
 
         // ── DAILY REGIME LOOKUP ─────────────────────────────────
-        // Use yesterday's daily close vs daily SMA20 to classify the market.
-        // This is the cleanest regime source — daily candles aren't fooled by
-        // intraday noise, and using YESTERDAY prevents lookahead bias.
-        const dateStr = new Date(curr.candle.ts).toISOString().slice(0, 10);
-        const regime  = dailyRegimeMap[dateStr] || 'neutral';
+        const dateStr   = new Date(curr.candle.ts).toISOString().slice(0, 10);
+        const regimeObj = dailyRegimeMap[dateStr] || { regime: 'neutral', close: null, sma20: null, pct: 0 };
+        const regime    = regimeObj.regime;
 
-        // Local slope filter: skip if 200SMA is also flat (double confirmation)
+        // Ensure a debug row exists for this day
+        if (!dailyDebug[dateStr]) {
+          dailyDebug[dateStr] = {
+            regime, close: regimeObj.close, sma20: regimeObj.sma20, pct: regimeObj.pct,
+            signals: 0, entered: 0,
+            blocked: { regime: 0, session: 0, volume: 0, slope: 0, momentum: 0 },
+          };
+        }
+
+        // Local slope filter
         const prevSma200 = idx >= SLOPE_WINDOW ? zoneData[idx - SLOPE_WINDOW].sma200 : null;
         const isTrending = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= SLOPE_THRESH;
 
-        // Session filter: London open (07:00 UTC) → NY close (21:00 UTC)
-        const inSession  = isAllowedSession(curr.candle.ts);
+        // Session + volume filters
+        const inSession = isAllowedSession(curr.candle.ts);
+        const highVol   = isVolumeSpike(curr);
 
-        // Volume filter: breakout candle must trade ≥ 1.5× 20-bar average volume
-        const highVol    = isVolumeSpike(curr);
-
-        // LONG signal — only fires in bull or neutral regime
+        // Detect fresh BMSB crossovers and log which filter blocks each attempt
         const freshBull = curr.zone === 'bull' && prev.zone !== 'bull';
-        const longOk    = freshBull
-          && (regime === 'bull' || regime === 'neutral')
-          && isTrending
-          && inSession
-          && highVol
-          && isMomentumCandle(curr.candle, 'long');
-
-        // SHORT signal — only fires in bear or neutral regime
         const freshBear = curr.zone === 'bear' && prev.zone !== 'bear';
-        const shortOk   = freshBear
-          && (regime === 'bear' || regime === 'neutral')
-          && isTrending
-          && inSession
-          && highVol
-          && isMomentumCandle(curr.candle, 'short');
+        let dir = null;
 
-        const dir = longOk ? 'long' : shortOk ? 'short' : null;
+        if (freshBull || freshBear) {
+          const sigDir   = freshBull ? 'long' : 'short';
+          const db       = dailyDebug[dateStr];
+          const regimeOk = sigDir === 'long'
+            ? (regime === 'bull' || regime === 'neutral')
+            : (regime === 'bear' || regime === 'neutral');
+          db.signals++;
+
+          if (!regimeOk)                                { db.blocked.regime++;   }
+          else if (!inSession)                          { db.blocked.session++;  }
+          else if (!highVol)                            { db.blocked.volume++;   }
+          else if (!isTrending)                         { db.blocked.slope++;    }
+          else if (!isMomentumCandle(curr.candle, sigDir)) { db.blocked.momentum++; }
+          else                                          { dir = sigDir;          }
+        }
 
         if (dir) {
           const riskAmt = capital * RISK_PCT;
@@ -539,6 +573,7 @@ function runBacktest(zoneData, dailyRegimeMap) {
 
             pos = { dir, entryPrice: curr.price, slPx, tpPx, qty, riskAmt, entryCapital: capital, entryIdx: idx };
             tradeCnt[dKey] = cnt + 1;
+            dailyDebug[dateStr].entered++;
           }
         }
       }
@@ -583,7 +618,7 @@ function runBacktest(zoneData, dailyRegimeMap) {
     ? Math.max(0, capital + ((pos.dir === 'long' ? 1 : -1) * (zoneData[zoneData.length-1].price - pos.entryPrice) * pos.qty))
     : capital;
 
-  return { trades, equity, finalCapital, tradeCnt };
+  return { trades, equity, finalCapital, tradeCnt, dailyDebug };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -749,7 +784,7 @@ function setLoadStatus(msg) {
 // ═══════════════════════════════════════════════════════════════
 //  RENDER
 // ═══════════════════════════════════════════════════════════════
-function renderResults(trades, equity, finalCapital, candles, tradeCnt) {
+function renderResults(trades, equity, finalCapital, candles, tradeCnt, dailyDebug = {}) {
   const st = calcStats(trades, finalCapital, tradeCnt);
 
   document.getElementById('dataRange').textContent =
@@ -844,6 +879,69 @@ function renderResults(trades, equity, finalCapital, candles, tradeCnt) {
     </div>`;
   }).join('');
 
+  // ── Regime Debug Panel ──────────────────────────────────────────
+  const regimeBadge = r => {
+    if (r === 'bull')    return `<span class="regime-bull">▲ BULL</span>`;
+    if (r === 'bear')    return `<span class="regime-bear">▼ BEAR</span>`;
+    if (r === 'range')   return `<span class="regime-range">⟺ RANGE</span>`;
+    return `<span class="regime-neutral">– NEUTRAL</span>`;
+  };
+  const blockPills = b => {
+    const parts = [];
+    if (b.regime)   parts.push(`<span class="block-pill bp-regime">Regime ×${b.regime}</span>`);
+    if (b.session)  parts.push(`<span class="block-pill bp-session">Session ×${b.session}</span>`);
+    if (b.volume)   parts.push(`<span class="block-pill bp-volume">Volume ×${b.volume}</span>`);
+    if (b.slope)    parts.push(`<span class="block-pill bp-slope">Slope ×${b.slope}</span>`);
+    if (b.momentum) parts.push(`<span class="block-pill bp-momentum">Momentum ×${b.momentum}</span>`);
+    return parts.length ? parts.join(' ') : `<span class="bp-none">—</span>`;
+  };
+
+  const debugRows = Object.entries(dailyDebug)
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 28)
+    .map(([dk, d]) => {
+      const dateLabel = new Date(dk + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const pctStr    = d.pct !== null ? `${d.pct >= 0 ? '+' : ''}${(d.pct * 100).toFixed(2)}%` : '—';
+      const pctClr    = d.pct > DAILY_REGIME_PCT ? 'var(--bull)' : d.pct < -DAILY_REGIME_PCT ? 'var(--bear)' : 'var(--warn)';
+      const closeStr  = d.close ? fp(d.close) : '—';
+      const smaStr    = d.sma20  ? fp(d.sma20)  : '—';
+      const silent    = d.signals === 0;
+      const trRow     = silent ? ' class="row-silent"' : '';
+      const sigCell   = silent
+        ? `<span class="bp-none">No BMSB signal</span>`
+        : `${d.signals} seen`;
+      const entCell   = d.entered > 0
+        ? `<span class="block-pill bp-entered">${d.entered} entered</span>`
+        : (silent ? `<span class="bp-none">—</span>` : `<span style="color:var(--muted)">0</span>`);
+      return `<tr${trRow}>
+        <td style="color:var(--text);font-weight:600">${dateLabel}</td>
+        <td>${regimeBadge(d.regime)}</td>
+        <td style="color:var(--muted)">${closeStr}</td>
+        <td style="color:var(--muted)">${smaStr}</td>
+        <td style="color:${pctClr};font-weight:700">${pctStr}</td>
+        <td>${sigCell}</td>
+        <td>${entCell}</td>
+        <td>${silent ? `<span class="bp-none">—</span>` : blockPills(d.blocked)}</td>
+      </tr>`;
+    }).join('');
+
+  const debugHtml = `
+    <div class="debug-card">
+      <div class="debug-head" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+        <span>🔍 Regime Debug — Why Did the Bot Go Silent?</span>
+        <span style="font-weight:400;letter-spacing:0;text-transform:none;font-size:11px">Last 28 days · click to collapse ▾</span>
+      </div>
+      <div class="debug-body">
+        <table class="debug-table">
+          <thead><tr>
+            <th>Date</th><th>Regime</th><th>Prev Close</th><th>SMA20</th>
+            <th>% from SMA</th><th>Signals</th><th>Trades</th><th>Blocked By</th>
+          </tr></thead>
+          <tbody>${debugRows || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">No data</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+
   const dailyHtml = `
     <div class="daily-card">
       <div class="daily-head"><span>Daily Breakdown</span><span style="font-weight:400;letter-spacing:0;text-transform:none;font-size:11px">Last 30 active days · newest first</span></div>
@@ -902,7 +1000,7 @@ function renderResults(trades, equity, finalCapital, candles, tradeCnt) {
       </div>
     </div>`;
 
-  document.getElementById('app').innerHTML = statsHtml + chartHtml + dailyHtml + tableHtml;
+  document.getElementById('app').innerHTML = statsHtml + chartHtml + debugHtml + dailyHtml + tableHtml;
   requestAnimationFrame(() => drawChart(equity, trades));
 }
 
@@ -931,11 +1029,11 @@ async function runAll() {
     setLoadBar(93); setLoadStatus('Running backtest…');
     await new Promise(r => setTimeout(r, 30));
 
-    const { trades, equity, finalCapital, tradeCnt } = runBacktest(zoneData, dailyRegimeMap);
+    const { trades, equity, finalCapital, tradeCnt, dailyDebug } = runBacktest(zoneData, dailyRegimeMap);
     setLoadBar(100); setLoadStatus('Rendering results…');
     await new Promise(r => setTimeout(r, 50));
 
-    renderResults(trades, equity, finalCapital, candles, tradeCnt);
+    renderResults(trades, equity, finalCapital, candles, tradeCnt, dailyDebug);
   } catch (e) {
     document.getElementById('app').innerHTML = `
       <div class="loading">
