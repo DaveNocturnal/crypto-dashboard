@@ -98,6 +98,7 @@
     .b-bear  { background:var(--bearDim); color:var(--bear); }
     .b-warn  { background:var(--warnDim); color:var(--warn); }
     .b-open  { background:#2563eb22; color:#7cb8ff; }
+    .b-be    { background:#a78bfa22; color:#c4b5fd; }
     .b-long  { background:#00d97e12; color:var(--bull); border:1px solid #00d97e33; }
     .b-short { background:#f0485a12; color:var(--bear); border:1px solid #f0485a33; }
 
@@ -169,30 +170,31 @@
     <div class="section-title">⚡ Scalp Strategy Rules — 15min BTC</div>
     <div class="rules-grid">
       <div class="rule-col">
-        <h4 style="color:var(--bull)">▲ Long Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BULL regime</span></h4>
-        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>Yesterday's daily close above 20-day SMA</strong> by &gt;1% — daily candle sets the regime</div>
+        <h4 style="color:var(--bull)">▲ Long Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— BULL or NEUTRAL regime</span></h4>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>Yesterday's daily close above 20-day SMA</strong> by &gt;0.5% — sets BULL; within 0.5% = NEUTRAL (longs still allowed)</div>
         <div class="rule-row"><span class="rtag rtag-bull">2</span> 15min BMSB zone freshly enters <strong>Bull</strong> (previous was Support or Bear)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bull">4</span> Entry candle closes in <strong>top 35%</strong> of its range (momentum confirmation)</div>
-        <div class="rule-row"><span class="rtag rtag-warn">5</span> Candle volume &gt; <strong>1.5× 20-bar average</strong> — institutional participation, not a wick</div>
+        <div class="rule-row"><span class="rtag rtag-warn">5</span> Candle volume &gt; <strong>1.2× 20-bar average</strong> — institutional participation, not a wick</div>
         <div class="rule-row"><span class="rtag rtag-ml">6</span> Entry time is <strong>London open → NY close</strong> (07:00–21:00 UTC) — Asia session blocked</div>
       </div>
       <div class="rule-col">
-        <h4 style="color:var(--bear)">▼ Short Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— active in BEAR regime</span></h4>
-        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>Yesterday's daily close below 20-day SMA</strong> by &gt;1% — daily candle sets the regime</div>
+        <h4 style="color:var(--bear)">▼ Short Entry <span style="font-size:10px;color:var(--muted);font-weight:400">— BEAR regime ONLY</span></h4>
+        <div class="rule-row"><span class="rtag rtag-ml">1</span> <strong>Yesterday's daily close below 20-day SMA</strong> by &gt;0.5% — explicit BEAR required (neutral days skip shorts)</div>
         <div class="rule-row"><span class="rtag rtag-bear">2</span> 15min BMSB zone freshly enters <strong>Bear</strong> (previous was Support or Bull)</div>
         <div class="rule-row"><span class="rtag rtag-warn">3</span> 200 SMA has a <strong>measurable slope</strong> — not flat/ranging locally</div>
         <div class="rule-row"><span class="rtag rtag-bear">4</span> Entry candle closes in <strong>bottom 35%</strong> of its range (momentum confirmation)</div>
-        <div class="rule-row"><span class="rtag rtag-warn">5</span> Candle volume &gt; <strong>1.5× 20-bar average</strong> — institutional participation, not a wick</div>
+        <div class="rule-row"><span class="rtag rtag-warn">5</span> Candle volume &gt; <strong>1.2× 20-bar average</strong> — institutional participation, not a wick</div>
         <div class="rule-row"><span class="rtag rtag-ml">6</span> Entry time is <strong>London open → NY close</strong> (07:00–21:00 UTC) — Asia session blocked</div>
       </div>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px">
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bull">TP</span> Take profit at <strong>2× the stop distance</strong> (fixed 2:1 R:R — no exceptions)</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop at BMSB band edge <strong>± 0.2% buffer</strong> (was 0.1% — widened for noise)</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop = <strong>1.5× ATR14 from entry</strong> — dynamic, adapts to volatility (no longer fixed %)</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag" style="background:#a78bfa22;color:#c4b5fd">BE</span> Once trade hits <strong>+1R (halfway to TP)</strong>, stop moves to entry — turn losers into flat</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>12 candles (3 hours)</strong> if TP/SL not hit</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-neu">MAX</span> <strong>3 trades per day</strong> max. Resets at UTC midnight.</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px;border:1px solid var(--bdr);padding:6px 10px!important;border-radius:6px;background:var(--card2)"><span class="rtag" style="background:#7c9cc822;color:var(--ml);border-color:#7c9cc844">RANGE</span> Daily close within 1% of 20-day SMA → <strong>all entries skipped</strong>, capital preserved</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px;border:1px solid var(--bdr);padding:6px 10px!important;border-radius:6px;background:var(--card2)"><span class="rtag" style="background:#7c9cc822;color:var(--ml);border-color:#7c9cc844">RANGE</span> Daily close within 0.5% of SMA20 → <strong>shorts blocked</strong>; longs still allowed on NEUTRAL days</div>
     </div>
   </div>
 
@@ -226,11 +228,14 @@ const MACRO_PERIOD     = 480;     // 480 × 15min = 5-day macro trend SMA
 const SLOPE_WINDOW     = 8;       // candles to measure SMA200 slope (2 hrs)
 const SLOPE_THRESH     = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
 const DAILY_SMA_PERIOD = 20;      // 20-day SMA for daily regime detection
-const DAILY_REGIME_PCT = 0.01;    // price must be >1% above/below SMA20 to confirm regime
+const DAILY_REGIME_PCT = 0.005;   // 0.5% threshold — was 1% (too many range days blocked)
 const TARGET_CANDLES   = 4000;    // ~6 weeks of 15min data
+// ── ATR-based dynamic stop ──────────────────────────────────────
+const ATR_PERIOD       = 14;      // 14-bar Average True Range
+const ATR_MULT         = 1.5;     // stop = 1.5× ATR from entry price
 // ── Volume spike filter ─────────────────────────────────────────
 const VOL_PERIOD       = 20;      // rolling bars for average volume
-const VOL_MULT         = 1.5;     // candle volume must be > 1.5× 20-bar avg to enter
+const VOL_MULT         = 1.2;     // candle volume must be > 1.2× 20-bar avg (was 1.5×)
 // ── Session filter ──────────────────────────────────────────────
 // London open: 07:00 UTC → NY close: 21:00 UTC
 // Asia session (21:00–07:00 UTC) is thin, wide spreads, high whipsaw rate
@@ -381,6 +386,23 @@ function computeAllZones(candles) {
     if (i >= VOL_PERIOD - 1) vAvg[i] = vSum / VOL_PERIOD;
   }
 
+  // ATR14 — True Range rolling average (adapts stop to current volatility)
+  const trs  = new Array(n).fill(0);
+  const atr  = new Array(n).fill(null);
+  for (let i = 1; i < n; i++) {
+    trs[i] = Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low  - candles[i - 1].close)
+    );
+  }
+  let atrSum = 0;
+  for (let i = 1; i < n; i++) {
+    atrSum += trs[i];
+    if (i >= ATR_PERIOD) atrSum -= trs[i - ATR_PERIOD];
+    if (i >= ATR_PERIOD) atr[i] = atrSum / ATR_PERIOD;
+  }
+
   const zones = [];
   for (let i = 21; i < n; i++) {
     const hi    = Math.max(s20[i], e21[i]);
@@ -392,6 +414,7 @@ function computeAllZones(candles) {
       sma96:  s96[i],
       sma480: s480[i],
       volAvg: vAvg[i],
+      atr14:  atr[i],
       candle: candles[i],
       zone: price > hi ? 'bull' : price < lo ? 'bear' : 'support',
     });
@@ -443,31 +466,39 @@ function runBacktest(zoneData, dailyRegimeMap) {
 
     // ── Manage open position ────────────────────────────────
     if (pos) {
+      // Break-even trail: once trade reaches halfway to TP (1:1), move stop to entry
+      if (!pos.beTriggered) {
+        const halfDist = Math.abs(pos.tpPx - pos.entryPrice) / 2;
+        const beReached = pos.dir === 'long'
+          ? curr.candle.high >= pos.entryPrice + halfDist
+          : curr.candle.low  <= pos.entryPrice - halfDist;
+        if (beReached) {
+          pos.slPx        = pos.entryPrice;
+          pos.beTriggered = true;
+        }
+      }
+
       let exitPx  = null;
       let exitWhy = null;
 
       if (pos.dir === 'long') {
-        // TP hit (check candle high)
         if (curr.candle.high >= pos.tpPx) {
           exitPx  = pos.tpPx;
           exitWhy = 'TP 2:1';
-        // SL hit (check candle low)
         } else if (curr.candle.low <= pos.slPx) {
           exitPx  = pos.slPx;
-          exitWhy = 'Stop Loss';
-        // Time stop
+          exitWhy = pos.beTriggered ? 'Break-Even' : 'Stop Loss';
         } else if (idx - pos.entryIdx >= MAX_HOLD) {
           exitPx  = curr.price;
           exitWhy = 'Time Stop (3h)';
         }
       } else {
-        // SHORT
         if (curr.candle.low <= pos.tpPx) {
           exitPx  = pos.tpPx;
           exitWhy = 'TP 2:1';
         } else if (curr.candle.high >= pos.slPx) {
           exitPx  = pos.slPx;
-          exitWhy = 'Stop Loss';
+          exitWhy = pos.beTriggered ? 'Break-Even' : 'Stop Loss';
         } else if (idx - pos.entryIdx >= MAX_HOLD) {
           exitPx  = curr.price;
           exitWhy = 'Time Stop (3h)';
@@ -537,41 +568,42 @@ function runBacktest(zoneData, dailyRegimeMap) {
         if (freshBull || freshBear) {
           const sigDir   = freshBull ? 'long' : 'short';
           const db       = dailyDebug[dateStr];
+          // Longs: bull or neutral regime OK  |  Shorts: bear regime ONLY (neutral → long bias)
           const regimeOk = sigDir === 'long'
             ? (regime === 'bull' || regime === 'neutral')
-            : (regime === 'bear' || regime === 'neutral');
+            : (regime === 'bear');
           db.signals++;
 
-          if (!regimeOk)                                { db.blocked.regime++;   }
-          else if (!inSession)                          { db.blocked.session++;  }
-          else if (!highVol)                            { db.blocked.volume++;   }
-          else if (!isTrending)                         { db.blocked.slope++;    }
-          else if (!isMomentumCandle(curr.candle, sigDir)) { db.blocked.momentum++; }
-          else                                          { dir = sigDir;          }
+          if (!regimeOk)                                    { db.blocked.regime++;   }
+          else if (!inSession)                              { db.blocked.session++;  }
+          else if (!highVol)                                { db.blocked.volume++;   }
+          else if (!isTrending)                             { db.blocked.slope++;    }
+          else if (!isMomentumCandle(curr.candle, sigDir))  { db.blocked.momentum++; }
+          else                                              { dir = sigDir;          }
         }
 
         if (dir) {
           const riskAmt = capital * RISK_PCT;
-          let slPx, tpPx, stopDist;
-
-          if (dir === 'long') {
-            slPx      = curr.lo * (1 - STOP_BUFFER);
-            stopDist  = curr.price - slPx;
-            tpPx      = curr.price + stopDist * RR_TARGET;
-          } else {
-            slPx      = curr.hi * (1 + STOP_BUFFER);
-            stopDist  = slPx - curr.price;
-            tpPx      = curr.price - stopDist * RR_TARGET;
-          }
-
-          const stopPct = stopDist / curr.price;
+          // ATR-based dynamic stop: adapts to current volatility
+          // Fall back to fixed STOP_BUFFER if ATR not yet computed
+          const atrStop = curr.atr14
+            ? curr.atr14 * ATR_MULT
+            : curr.price * STOP_BUFFER;
+          const stopDist = atrStop;
+          const slPx     = dir === 'long'
+            ? curr.price - stopDist
+            : curr.price + stopDist;
+          const tpPx     = dir === 'long'
+            ? curr.price + stopDist * RR_TARGET
+            : curr.price - stopDist * RR_TARGET;
+          const stopPct  = stopDist / curr.price;
 
           // Only enter if stop is 0.1%–8% away
           if (stopPct >= 0.001 && stopPct <= 0.08) {
             const posSize = riskAmt / stopPct;
             const qty     = posSize / curr.price;
 
-            pos = { dir, entryPrice: curr.price, slPx, tpPx, qty, riskAmt, entryCapital: capital, entryIdx: idx };
+            pos = { dir, entryPrice: curr.price, slPx, tpPx, qty, riskAmt, entryCapital: capital, entryIdx: idx, beTriggered: false };
             tradeCnt[dKey] = cnt + 1;
             dailyDebug[dateStr].entered++;
           }
@@ -960,7 +992,7 @@ function renderResults(trades, equity, finalCapital, candles, tradeCnt, dailyDeb
   const rows = [...trades].reverse().map(t => {
     const open   = t.isOpen;
     const win    = t.pnl > 0;
-    const bCls   = open ? 'b-open' : t.exitWhy === 'TP 2:1' ? 'b-bull' : t.exitWhy === 'Stop Loss' ? 'b-bear' : 'b-warn';
+    const bCls   = open ? 'b-open' : t.exitWhy === 'TP 2:1' ? 'b-bull' : t.exitWhy === 'Stop Loss' ? 'b-bear' : t.exitWhy === 'Break-Even' ? 'b-be' : 'b-warn';
     const dirCls = t.dir === 'long' ? 'b-long' : 'b-short';
     const rClr   = clr(t.pnl);
     return `<tr>
