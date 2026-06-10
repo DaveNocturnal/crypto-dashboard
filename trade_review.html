@@ -221,6 +221,13 @@ const BYBIT_URL = 'https://api.bybit.com/v5/market/kline';
 let currentBot  = 'scalp';
 let lastResults = null;
 
+// Shared engine constants — keep in sync with scalp_backtest.html
+const FEE_RATE      = 0.00055; // Bybit taker 0.055% per side
+const ATR_MULT      = 1.5;     // stop = 1.5× ATR14 (if wider than band edge)
+const VOL_MULT      = 1.2;     // entry candle volume ≥ 1.2× 20-bar avg
+const SESSION_START = 7;       // London open (UTC hour, inclusive)
+const SESSION_END   = 21;      // NY close (UTC hour, exclusive)
+
 const DEFAULT_PARAMS = {
   scalp: { riskPct:0.01, maxHold:12, stopBuffer:0.002, momentumThresh:0.35, minStop:0.001, maxStop:0.08, rrTarget:2.0 },
   daily: { riskPct:0.01, maxHold:30, stopBuffer:0.002, minStop:0.005, maxStop:0.15 },
@@ -241,7 +248,7 @@ async function fetchBTCDaily() {
 async function fetchBTC15m() {
   const all = [];
   let endTime = null;
-  for (let p = 0; p < 4; p++) {
+  for (let p = 0; p < 8; p++) {
     let url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=15&limit=1000`;
     if (endTime) url += `&end=${endTime}`;
     const r = await fetch(url);
@@ -249,12 +256,12 @@ async function fetchBTC15m() {
     if (d.retCode !== 0) throw new Error(d.retMsg);
     const batch = d.result.list;
     if (!batch.length) break;
-    all.unshift(...batch.slice().reverse().map(c => ({ ts:+c[0], open:+c[1], high:+c[2], low:+c[3], close:+c[4] })));
+    all.unshift(...batch.slice().reverse().map(c => ({ ts:+c[0], open:+c[1], high:+c[2], low:+c[3], close:+c[4], volume:+c[5] })));
     endTime = +batch[batch.length-1][0] - 1;
     if (batch.length < 1000) break;
-    if (p < 3) await new Promise(r => setTimeout(r, 200));
+    if (p < 7) await new Promise(r => setTimeout(r, 200));
   }
-  return all.slice(-4000);
+  return all.slice(-8000);
 }
 
 async function fetchDailyRegimeMap() {
@@ -279,8 +286,8 @@ async function fetchDailyRegimeMap() {
   for (let i = 1; i < n; i++) {
     if (sma20[i - 1] === null) continue;
     const pct    = (closes[i - 1] - sma20[i - 1]) / sma20[i - 1];
-    const regime = pct >  0.01 ? 'bull'
-                 : pct < -0.01 ? 'bear' : 'range';
+    const regime = pct >  0.005 ? 'bull'
+                 : pct < -0.005 ? 'bear' : 'range';
     const dateStr = new Date(candles[i].ts).toISOString().slice(0, 10);
     map[dateStr] = regime;
   }
@@ -307,10 +314,18 @@ function computeZones(candles) {
   for (let i=0;i<n;i++) { s9+=c[i]; if(i>=96)s9-=c[i-96]; if(i>=95)s96[i]=s9/96; }
   const s480=new Array(n).fill(null); let s4=0;
   for (let i=0;i<n;i++) { s4+=c[i]; if(i>=480)s4-=c[i-480]; if(i>=479)s480[i]=s4/480; }
+  // Rolling 20-bar volume average
+  const vAvg=new Array(n).fill(null); let vS=0;
+  for (let i=0;i<n;i++) { vS+=candles[i].volume||0; if(i>=20)vS-=candles[i-20].volume||0; if(i>=19)vAvg[i]=vS/20; }
+  // ATR14 — true ranges first, then rolling average
+  const trs=new Array(n).fill(0);
+  for (let i=1;i<n;i++) trs[i]=Math.max(candles[i].high-candles[i].low, Math.abs(candles[i].high-candles[i-1].close), Math.abs(candles[i].low-candles[i-1].close));
+  const atr=new Array(n).fill(null); let aS=0;
+  for (let i=1;i<n;i++) { aS+=trs[i]; if(i>=15)aS-=trs[i-14]; if(i>=14)atr[i]=aS/14; }
   const zones = [];
   for (let i=21;i<n;i++) {
     const hi=Math.max(s20[i],e21[i]), lo=Math.min(s20[i],e21[i]);
-    zones.push({ i, price:c[i], hi, lo, sma200:s200[i], sma96:s96[i], sma480:s480[i], candle:candles[i], zone: c[i]>hi?'bull':c[i]<lo?'bear':'support' });
+    zones.push({ i, price:c[i], hi, lo, sma200:s200[i], sma96:s96[i], sma480:s480[i], volAvg:vAvg[i], atr14:atr[i], candle:candles[i], zone: c[i]>hi?'bull':c[i]<lo?'bear':'support' });
   }
   return zones;
 }
@@ -328,46 +343,75 @@ function runScalpBacktest(zoneData, p, dailyRegimeMap = {}) {
     const pos2 = (c.close - c.low) / r;
     return dir === 'long' ? pos2 >= (1 - momentumThresh) : pos2 <= momentumThresh;
   };
+  const inSession = ts => { const h = new Date(ts).getUTCHours(); return h >= SESSION_START && h < SESSION_END; };
+  const volSpike  = z  => !z.volAvg || z.candle.volume >= z.volAvg * VOL_MULT;
+
   for (let idx=1; idx<zoneData.length; idx++) {
     const curr=zoneData[idx], prev=zoneData[idx-1], dk=dayKey(curr.candle.ts);
+
+    // ── Manage position: pessimistic fills, partial TP at +1R, fees ──
     if (pos) {
+      const c = curr.candle, isLong = pos.dir==='long';
       let exitPx=null, exitWhy=null;
-      if (pos.dir==='long') {
-        if (curr.candle.high>=pos.tpPx){exitPx=pos.tpPx;exitWhy='TP 2:1';}
-        else if (curr.candle.low<=pos.slPx){exitPx=pos.slPx;exitWhy='Stop Loss';}
-        else if (idx-pos.entryIdx>=maxHold){exitPx=curr.price;exitWhy='Time Stop';}
+      const stopHit = isLong ? c.low<=pos.slPx : c.high>=pos.slPx;
+      if (stopHit) {
+        exitPx=pos.slPx; exitWhy=pos.partialDone?'½TP + BE':'Stop Loss';
       } else {
-        if (curr.candle.low<=pos.tpPx){exitPx=pos.tpPx;exitWhy='TP 2:1';}
-        else if (curr.candle.high>=pos.slPx){exitPx=pos.slPx;exitWhy='Stop Loss';}
-        else if (idx-pos.entryIdx>=maxHold){exitPx=curr.price;exitWhy='Time Stop';}
+        if (!pos.partialDone) {
+          const r1Hit = isLong ? c.high>=pos.r1Px : c.low<=pos.r1Px;
+          if (r1Hit) {
+            const halfQty=pos.qty/2;
+            const rawPnl=isLong ? (pos.r1Px-pos.entryPrice)*halfQty : (pos.entryPrice-pos.r1Px)*halfQty;
+            const fee=pos.r1Px*halfQty*FEE_RATE;
+            pos.realized+=rawPnl-fee; pos.qty=halfQty; pos.slPx=pos.entryPrice; pos.partialDone=true;
+            const beDip = isLong ? c.low<=pos.slPx : c.high>=pos.slPx;
+            if (beDip) { exitPx=pos.slPx; exitWhy='½TP + BE'; }
+          }
+        }
+        if (exitPx===null) {
+          const tpHit = isLong ? c.high>=pos.tpPx : c.low<=pos.tpPx;
+          if (tpHit) { exitPx=pos.tpPx; exitWhy=pos.partialDone?'½TP + TP':'TP 2:1'; }
+          else if (idx-pos.entryIdx>=maxHold) { exitPx=curr.price; exitWhy='Time Stop'; }
+        }
       }
       if (exitPx!==null) {
-        const pnl = pos.dir==='long' ? (exitPx-pos.entryPrice)*pos.qty : (pos.entryPrice-exitPx)*pos.qty;
+        const rawPnl = isLong ? (exitPx-pos.entryPrice)*pos.qty : (pos.entryPrice-exitPx)*pos.qty;
+        const pnl = pos.realized + rawPnl - exitPx*pos.qty*FEE_RATE;
         capital = Math.max(0, capital+pnl);
         trades.push({ dir:pos.dir, entryTs:zoneData[pos.entryIdx].candle.ts, exitTs:curr.candle.ts, entryPrice:pos.entryPrice, exitPrice:exitPx, slPx:pos.slPx, tpPx:pos.tpPx, exitWhy, pnl, duration:idx-pos.entryIdx, riskAmt:pos.riskAmt });
         pos = null;
       }
     }
+
+    // ── Entry: regime + session + volume + slope + momentum gates ──
     if (!pos) {
       const cnt = tradeCnt[dk]||0;
       if (cnt < 3) {
         const freshBull  = curr.zone==='bull' && prev.zone!=='bull';
         const freshBear  = curr.zone==='bear' && prev.zone!=='bear';
-        // Daily candle regime: yesterday's close vs 20-day SMA (no lookahead)
+        // Daily candle regime: longs on bull/neutral, shorts on BEAR ONLY
         const regime = dailyRegimeMap[dk] || 'neutral';
         const prevSma200 = idx >= 8 ? zoneData[idx-8].sma200 : null;
         const trending   = !prevSma200 || Math.abs(curr.sma200 - prevSma200) / curr.price >= 0.0004;
-        const dir = (freshBull && (regime==='bull'||regime==='neutral') && trending && isMom(curr.candle,'long'))  ? 'long'
-                  : (freshBear && (regime==='bear'||regime==='neutral') && trending && isMom(curr.candle,'short')) ? 'short' : null;
+        const gates      = trending && inSession(curr.candle.ts) && volSpike(curr);
+        const dir = (freshBull && (regime==='bull'||regime==='neutral') && gates && isMom(curr.candle,'long'))  ? 'long'
+                  : (freshBear && regime==='bear'                       && gates && isMom(curr.candle,'short')) ? 'short' : null;
         if (dir) {
           const riskAmt=capital*riskPct;
-          const slPx = dir==='long' ? curr.lo*(1-stopBuffer) : curr.hi*(1+stopBuffer);
+          // Hybrid stop: band edge or ATR — whichever is wider
+          const bandStop = dir==='long' ? curr.lo*(1-stopBuffer) : curr.hi*(1+stopBuffer);
+          const atrStop  = curr.atr14
+            ? (dir==='long' ? curr.price-curr.atr14*ATR_MULT : curr.price+curr.atr14*ATR_MULT)
+            : bandStop;
+          const slPx = dir==='long' ? Math.min(bandStop, atrStop) : Math.max(bandStop, atrStop);
           const stopDist = Math.abs(curr.price - slPx);
           const stopPct = stopDist/curr.price;
           if (stopPct>=minStop && stopPct<=maxStop) {
             const qty = (riskAmt/stopPct)/curr.price;
             const tpPx = dir==='long' ? curr.price+stopDist*rrTarget : curr.price-stopDist*rrTarget;
-            pos = { dir, entryPrice:curr.price, slPx, tpPx, qty, riskAmt, entryCapital:capital, entryIdx:idx };
+            const r1Px = dir==='long' ? curr.price+stopDist : curr.price-stopDist;
+            const entryFee = curr.price*qty*FEE_RATE;
+            pos = { dir, entryPrice:curr.price, slPx, tpPx, r1Px, qty, riskAmt, entryCapital:capital, entryIdx:idx, partialDone:false, realized:-entryFee };
             tradeCnt[dk] = cnt+1;
           }
         }

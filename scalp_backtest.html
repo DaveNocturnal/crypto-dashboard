@@ -189,9 +189,9 @@
       </div>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--bdr);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px">
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bull">TP</span> Take profit at <strong>2× the stop distance</strong> (fixed 2:1 R:R — no exceptions)</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop = <strong>1.5× ATR14 from entry</strong> — dynamic, adapts to volatility (no longer fixed %)</div>
-      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag" style="background:#a78bfa22;color:#c4b5fd">BE</span> Once trade hits <strong>+1R (halfway to TP)</strong>, stop moves to entry — turn losers into flat</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bull">TP</span> <strong>½ position closes at +1R</strong>, stop → entry; rest runs to <strong>2:1</strong></div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-bear">SL</span> Stop = <strong>band edge or 1.5× ATR14 — whichever is wider</strong> (structure + volatility aware)</div>
+      <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag" style="background:#a78bfa22;color:#c4b5fd">FEE</span> <strong>0.055% taker fee per side</strong> modeled · same-candle TP/SL conflicts resolve <strong>pessimistically</strong></div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-warn">TIME</span> Exit flat after <strong>12 candles (3 hours)</strong> if TP/SL not hit</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px"><span class="rtag rtag-neu">MAX</span> <strong>3 trades per day</strong> max. Resets at UTC midnight.</div>
       <div class="rule-row" style="padding:0;border:none;flex:1;min-width:200px;border:1px solid var(--bdr);padding:6px 10px!important;border-radius:6px;background:var(--card2)"><span class="rtag" style="background:#7c9cc822;color:var(--ml);border-color:#7c9cc844">RANGE</span> Daily close within 0.5% of SMA20 → <strong>shorts blocked</strong>; longs still allowed on NEUTRAL days</div>
@@ -208,9 +208,9 @@
 </main>
 
 <footer class="footer">
-  Data: Bybit BTCUSDT 15min · ~4,000 candles ≈ 6 weeks · Long &amp; short trades<br>
-  Filters: Daily regime · SMA200 slope · Volume spike (1.5×) · Session (London/NY only 07:00–21:00 UTC)<br>
-  Paper simulation only · Past performance does not guarantee future results
+  Data: Bybit BTCUSDT 15min · ~8,000 candles ≈ 12 weeks · Long &amp; short trades<br>
+  Filters: Daily regime · SMA200 slope · Volume spike (1.2×) · Session (London/NY only 07:00–21:00 UTC)<br>
+  Fees modeled at 0.055%/side · Pessimistic same-candle fills · Paper simulation only
 </footer>
 
 <script>
@@ -229,7 +229,8 @@ const SLOPE_WINDOW     = 8;       // candles to measure SMA200 slope (2 hrs)
 const SLOPE_THRESH     = 0.0004;  // skip entry if 200SMA moved < 0.04% in 2hrs (very flat)
 const DAILY_SMA_PERIOD = 20;      // 20-day SMA for daily regime detection
 const DAILY_REGIME_PCT = 0.005;   // 0.5% threshold — was 1% (too many range days blocked)
-const TARGET_CANDLES   = 4000;    // ~6 weeks of 15min data
+const TARGET_CANDLES   = 8000;    // ~12 weeks of 15min data (was 4000 — sample too small)
+const FEE_RATE         = 0.00055; // Bybit taker fee 0.055% per side — charged on notional
 // ── ATR-based dynamic stop ──────────────────────────────────────
 const ATR_PERIOD       = 14;      // 14-bar Average True Range
 const ATR_MULT         = 1.5;     // stop = 1.5× ATR from entry price
@@ -465,50 +466,60 @@ function runBacktest(zoneData, dailyRegimeMap) {
     const dKey = dayKey(curr.candle.ts);
 
     // ── Manage open position ────────────────────────────────
+    // PESSIMISTIC same-candle resolution: when a candle spans both the stop
+    // and an upside level, the stop is assumed to fill first. Backtest results
+    // are a floor, not a ceiling.
     if (pos) {
-      // Break-even trail: once trade reaches halfway to TP (1:1), move stop to entry
-      if (!pos.beTriggered) {
-        const halfDist = Math.abs(pos.tpPx - pos.entryPrice) / 2;
-        const beReached = pos.dir === 'long'
-          ? curr.candle.high >= pos.entryPrice + halfDist
-          : curr.candle.low  <= pos.entryPrice - halfDist;
-        if (beReached) {
-          pos.slPx        = pos.entryPrice;
-          pos.beTriggered = true;
-        }
-      }
+      const c       = curr.candle;
+      const isLong  = pos.dir === 'long';
+      let   exitPx  = null;
+      let   exitWhy = null;
 
-      let exitPx  = null;
-      let exitWhy = null;
+      const stopHit = isLong ? c.low <= pos.slPx : c.high >= pos.slPx;
 
-      if (pos.dir === 'long') {
-        if (curr.candle.high >= pos.tpPx) {
-          exitPx  = pos.tpPx;
-          exitWhy = 'TP 2:1';
-        } else if (curr.candle.low <= pos.slPx) {
-          exitPx  = pos.slPx;
-          exitWhy = pos.beTriggered ? 'Break-Even' : 'Stop Loss';
-        } else if (idx - pos.entryIdx >= MAX_HOLD) {
-          exitPx  = curr.price;
-          exitWhy = 'Time Stop (3h)';
-        }
+      if (stopHit) {
+        exitPx  = pos.slPx;
+        exitWhy = pos.partialDone ? '½TP + BE' : 'Stop Loss';
       } else {
-        if (curr.candle.low <= pos.tpPx) {
-          exitPx  = pos.tpPx;
-          exitWhy = 'TP 2:1';
-        } else if (curr.candle.high >= pos.slPx) {
-          exitPx  = pos.slPx;
-          exitWhy = pos.beTriggered ? 'Break-Even' : 'Stop Loss';
-        } else if (idx - pos.entryIdx >= MAX_HOLD) {
-          exitPx  = curr.price;
-          exitWhy = 'Time Stop (3h)';
+        // Partial TP: bank half the position at +1R, stop → entry for the rest
+        if (!pos.partialDone) {
+          const r1Hit = isLong ? c.high >= pos.r1Px : c.low <= pos.r1Px;
+          if (r1Hit) {
+            const halfQty = pos.qty / 2;
+            const rawPnl  = isLong
+              ? (pos.r1Px - pos.entryPrice) * halfQty
+              : (pos.entryPrice - pos.r1Px) * halfQty;
+            const fee     = pos.r1Px * halfQty * FEE_RATE;
+            pos.realized += rawPnl - fee;
+            pos.feesPaid += fee;
+            pos.qty       = halfQty;
+            pos.slPx      = pos.entryPrice;
+            pos.partialDone = true;
+            // Pessimistic: if this same candle also dipped back to entry,
+            // assume the dip came after the partial — remainder exits at BE
+            const beDip = isLong ? c.low <= pos.slPx : c.high >= pos.slPx;
+            if (beDip) { exitPx = pos.slPx; exitWhy = '½TP + BE'; }
+          }
+        }
+        if (exitPx === null) {
+          const tpHit = isLong ? c.high >= pos.tpPx : c.low <= pos.tpPx;
+          if (tpHit) {
+            exitPx  = pos.tpPx;
+            exitWhy = pos.partialDone ? '½TP + TP' : 'TP 2:1';
+          } else if (idx - pos.entryIdx >= MAX_HOLD) {
+            exitPx  = curr.price;
+            exitWhy = pos.partialDone ? '½TP + Time' : 'Time Stop (3h)';
+          }
         }
       }
 
       if (exitPx !== null) {
-        const pnl = pos.dir === 'long'
+        const rawPnl = isLong
           ? (exitPx - pos.entryPrice) * pos.qty
           : (pos.entryPrice - exitPx) * pos.qty;
+        const exitFee = exitPx * pos.qty * FEE_RATE;
+        const pnl     = pos.realized + rawPnl - exitFee;
+        pos.feesPaid += exitFee;
 
         capital = Math.max(0, capital + pnl);
 
@@ -523,6 +534,7 @@ function runBacktest(zoneData, dailyRegimeMap) {
           tpPx:         pos.tpPx,
           exitWhy,
           pnl,
+          fees:         pos.feesPaid,
           pnlPct:       pnl / pos.entryCapital * 100,
           duration:     idx - pos.entryIdx,
           riskAmt:      pos.riskAmt,
@@ -584,26 +596,43 @@ function runBacktest(zoneData, dailyRegimeMap) {
 
         if (dir) {
           const riskAmt = capital * RISK_PCT;
-          // ATR-based dynamic stop: adapts to current volatility
-          // Fall back to fixed STOP_BUFFER if ATR not yet computed
+          // Hybrid stop: band edge (structure) or ATR (volatility) — whichever
+          // is WIDER. The band is real support; the ATR keeps the stop outside
+          // the noise floor. Never place a stop inside either.
+          const bandStop = dir === 'long'
+            ? curr.lo * (1 - STOP_BUFFER)
+            : curr.hi * (1 + STOP_BUFFER);
           const atrStop = curr.atr14
-            ? curr.atr14 * ATR_MULT
-            : curr.price * STOP_BUFFER;
-          const stopDist = atrStop;
-          const slPx     = dir === 'long'
-            ? curr.price - stopDist
-            : curr.price + stopDist;
+            ? (dir === 'long'
+                ? curr.price - curr.atr14 * ATR_MULT
+                : curr.price + curr.atr14 * ATR_MULT)
+            : bandStop;
+          const slPx = dir === 'long'
+            ? Math.min(bandStop, atrStop)
+            : Math.max(bandStop, atrStop);
+
+          const stopDist = Math.abs(curr.price - slPx);
           const tpPx     = dir === 'long'
             ? curr.price + stopDist * RR_TARGET
             : curr.price - stopDist * RR_TARGET;
+          const r1Px     = dir === 'long'
+            ? curr.price + stopDist          // +1R — partial TP level
+            : curr.price - stopDist;
           const stopPct  = stopDist / curr.price;
 
           // Only enter if stop is 0.1%–8% away
           if (stopPct >= 0.001 && stopPct <= 0.08) {
-            const posSize = riskAmt / stopPct;
-            const qty     = posSize / curr.price;
+            const posSize  = riskAmt / stopPct;
+            const qty      = posSize / curr.price;
+            const entryFee = curr.price * qty * FEE_RATE;
 
-            pos = { dir, entryPrice: curr.price, slPx, tpPx, qty, riskAmt, entryCapital: capital, entryIdx: idx, beTriggered: false };
+            pos = {
+              dir, entryPrice: curr.price, slPx, tpPx, r1Px, qty, riskAmt,
+              entryCapital: capital, entryIdx: idx,
+              partialDone: false,
+              realized:  -entryFee,   // entry fee paid up front
+              feesPaid:   entryFee,
+            };
             tradeCnt[dKey] = cnt + 1;
             dailyDebug[dateStr].entered++;
           }
@@ -611,11 +640,11 @@ function runBacktest(zoneData, dailyRegimeMap) {
       }
     }
 
-    // Mark-to-market equity
+    // Mark-to-market equity (includes banked partials, net of fees paid so far)
     const mtm = pos
-      ? (pos.dir === 'long'
-          ? capital + (curr.price - pos.entryPrice) * pos.qty
-          : capital + (pos.entryPrice - curr.price) * pos.qty)
+      ? capital + pos.realized + (pos.dir === 'long'
+          ? (curr.price - pos.entryPrice) * pos.qty
+          : (pos.entryPrice - curr.price) * pos.qty)
       : capital;
     equity.push({ ts: curr.candle.ts, capital: Math.max(0, mtm) });
   }
@@ -623,9 +652,9 @@ function runBacktest(zoneData, dailyRegimeMap) {
   // Open position at end
   if (pos) {
     const last = zoneData[zoneData.length - 1];
-    const upnl = pos.dir === 'long'
+    const upnl = pos.realized + (pos.dir === 'long'
       ? (last.price - pos.entryPrice) * pos.qty
-      : (pos.entryPrice - last.price) * pos.qty;
+      : (pos.entryPrice - last.price) * pos.qty);
     trades.push({
       num:          trades.length + 1,
       dir:          pos.dir,
@@ -637,6 +666,7 @@ function runBacktest(zoneData, dailyRegimeMap) {
       tpPx:         pos.tpPx,
       exitWhy:      'OPEN',
       pnl:          upnl,
+      fees:         pos.feesPaid,
       pnlPct:       upnl / pos.entryCapital * 100,
       duration:     zoneData.length - 1 - pos.entryIdx,
       riskAmt:      pos.riskAmt,
@@ -647,7 +677,7 @@ function runBacktest(zoneData, dailyRegimeMap) {
   }
 
   const finalCapital = pos
-    ? Math.max(0, capital + ((pos.dir === 'long' ? 1 : -1) * (zoneData[zoneData.length-1].price - pos.entryPrice) * pos.qty))
+    ? Math.max(0, capital + pos.realized + ((pos.dir === 'long' ? 1 : -1) * (zoneData[zoneData.length-1].price - pos.entryPrice) * pos.qty))
     : capital;
 
   return { trades, equity, finalCapital, tradeCnt, dailyDebug };
@@ -693,10 +723,14 @@ function calcStats(trades, finalCapital, tradeCnt) {
   const londonPnl = londonTrades.reduce((s, t) => s + t.pnl, 0);
   const nyPnl     = nyTrades.reduce((s, t) => s + t.pnl, 0);
 
+  const totalFees = trades.reduce((s, t) => s + (t.fees || 0), 0);
+  const partials  = closed.filter(t => t.exitWhy && t.exitWhy.startsWith('½TP')).length;
+
   return {
     totalRet:  (finalCapital - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100,
     winRate:   closed.length ? wins.length / closed.length * 100 : 0,
     pf:        grossL > 0 ? grossW / grossL : (grossW > 0 ? Infinity : 0),
+    totalFees, partials,
     avgR:      closed.length ? closed.reduce((s, t) => s + t.rMult, 0) / closed.length : 0,
     avgDur:    closed.length ? closed.reduce((s, t) => s + t.duration, 0) / closed.length : 0,
     maxDD, longs: longs.length, shorts: shorts.length, longWR, shortWR,
@@ -880,6 +914,16 @@ function renderResults(trades, equity, finalCapital, candles, tradeCnt, dailyDeb
         <div class="stat-sub">Single trade max gain</div>
       </div>
       <div class="stat-card">
+        <div class="stat-label">Fees Paid</div>
+        <div class="stat-val" style="color:var(--bear)">−${fp(st.totalFees)}</div>
+        <div class="stat-sub">0.055%/side taker · already in P&amp;L</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Partial TPs</div>
+        <div class="stat-val" style="color:#c4b5fd">${st.partials}</div>
+        <div class="stat-sub">Banked ½ at +1R</div>
+      </div>
+      <div class="stat-card">
         <div class="stat-label">London Session</div>
         <div class="stat-val" style="color:${st.londonWR>=50?'var(--bull)':st.londonWR>=33?'var(--warn)':'var(--bear)'}">${st.londonWR.toFixed(0)}% WR</div>
         <div class="stat-sub">${st.londonTrades} trades · ${st.londonPnl>=0?'+':''}${fp(st.londonPnl)}</div>
@@ -992,7 +1036,10 @@ function renderResults(trades, equity, finalCapital, candles, tradeCnt, dailyDeb
   const rows = [...trades].reverse().map(t => {
     const open   = t.isOpen;
     const win    = t.pnl > 0;
-    const bCls   = open ? 'b-open' : t.exitWhy === 'TP 2:1' ? 'b-bull' : t.exitWhy === 'Stop Loss' ? 'b-bear' : t.exitWhy === 'Break-Even' ? 'b-be' : 'b-warn';
+    const bCls   = open ? 'b-open'
+                 : (t.exitWhy === 'TP 2:1' || t.exitWhy === '½TP + TP') ? 'b-bull'
+                 : t.exitWhy === 'Stop Loss' ? 'b-bear'
+                 : t.exitWhy === '½TP + BE' ? 'b-be' : 'b-warn';
     const dirCls = t.dir === 'long' ? 'b-long' : 'b-short';
     const rClr   = clr(t.pnl);
     return `<tr>
