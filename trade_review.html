@@ -235,14 +235,28 @@ const DEFAULT_PARAMS = {
 let customParams = JSON.parse(JSON.stringify(DEFAULT_PARAMS));
 
 // ═══════════════════════════════════════════════════════════════
-//  FETCH
+//  FETCH — bybitFetch retries with backoff when rate-limited
 // ═══════════════════════════════════════════════════════════════
+async function bybitFetch(url, attempts = 5) {
+  for (let a = 0; a < attempts; a++) {
+    let d = null;
+    try {
+      const r = await fetch(url);
+      if (r.ok) d = await r.json();
+    } catch (e) { /* network hiccup — retry */ }
+    if (d) {
+      if (d.retCode === 0) return d;
+      if (!/too many visits|rate ?limit/i.test(d.retMsg || '')) throw new Error(d.retMsg);
+    }
+    if (a < attempts - 1) await new Promise(res => setTimeout(res, 1500 * Math.pow(2, a)));
+  }
+  throw new Error('Bybit rate limit persists — wait ~1 minute, then re-run');
+}
+
 async function fetchBTCDaily() {
   const url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=D&limit=1000`;
-  const r   = await fetch(url);
-  const d   = await r.json();
-  if (d.retCode !== 0) throw new Error(d.retMsg);
-  return d.result.list.slice().reverse().map(c => ({ ts:+c[0], open:+c[1], high:+c[2], low:+c[3], close:+c[4] }));
+  const d   = await bybitFetch(url);
+  return d.result.list.slice().reverse().map(c => ({ ts:+c[0], open:+c[1], high:+c[2], low:+c[3], close:+c[4], volume:+c[5] }));
 }
 
 async function fetchBTC15m() {
@@ -251,24 +265,20 @@ async function fetchBTC15m() {
   for (let p = 0; p < 8; p++) {
     let url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=15&limit=1000`;
     if (endTime) url += `&end=${endTime}`;
-    const r = await fetch(url);
-    const d = await r.json();
-    if (d.retCode !== 0) throw new Error(d.retMsg);
+    const d = await bybitFetch(url);
     const batch = d.result.list;
     if (!batch.length) break;
     all.unshift(...batch.slice().reverse().map(c => ({ ts:+c[0], open:+c[1], high:+c[2], low:+c[3], close:+c[4], volume:+c[5] })));
     endTime = +batch[batch.length-1][0] - 1;
     if (batch.length < 1000) break;
-    if (p < 7) await new Promise(r => setTimeout(r, 200));
+    if (p < 7) await new Promise(r => setTimeout(r, 500));
   }
   return all.slice(-8000);
 }
 
 async function fetchDailyRegimeMap() {
-  const url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=D&limit=60`;
-  const r   = await fetch(url);
-  const d   = await r.json();
-  if (d.retCode !== 0) throw new Error(d.retMsg);
+  const url = `${BYBIT_URL}?category=linear&symbol=BTCUSDT&interval=D&limit=120`;
+  const d   = await bybitFetch(url);
   const candles = d.result.list.slice().reverse()
     .map(c => ({ ts: +c[0], close: +c[4] }));
   const closes = candles.map(c => c.close);
