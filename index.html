@@ -30,7 +30,7 @@
       background-attachment: fixed;
       color:var(--text);
       font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;
-      min-height:100vh; padding-bottom:50px;
+      min-height:100vh; padding-bottom:50px; overflow-x:hidden;
     }
 
     /* ── Stats bar ── */
@@ -73,11 +73,17 @@
     .tf-btn.dud::after { content:'·no edge'; font-size:9px; margin-left:6px; color:var(--bear); letter-spacing:.3px; }
     .tf-btn.dud.on { opacity:1; }
     .tf-note { font-size:12px; color:var(--muted2); margin-left:6px; }
+    .upd { font-size:11.5px; color:var(--muted2); margin-left:auto; white-space:nowrap; }
+    .refresh-btn { padding:7px 13px; border-radius:9px; font-size:12px; font-weight:600; cursor:pointer;
+                   background:#ffffff08; border:1px solid var(--bdr); color:var(--muted);
+                   font-family:inherit; transition:all .15s; white-space:nowrap; }
+    .refresh-btn:hover { color:var(--text); border-color:var(--accent); }
+    .refresh-btn:disabled { opacity:.5; cursor:not-allowed; }
 
     /* ── Layout ── */
     .layout {
       max-width:1560px; margin:18px auto 0; padding:0 24px;
-      display:grid; grid-template-columns:1fr 320px; gap:22px; align-items:start;
+      display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:22px; align-items:start;
     }
 
     /* ── Search ── */
@@ -195,7 +201,7 @@
     .foot { text-align:center; color:var(--muted2); font-size:11.5px; padding:28px 24px 0; line-height:1.9; }
 
     @media(max-width:1150px) {
-      .layout { grid-template-columns:1fr; }
+      .layout { grid-template-columns:minmax(0,1fr); }
       .side { position:static; }
     }
     @media(max-width:640px) {
@@ -252,6 +258,8 @@
   <button class="tf-btn on" data-tf="W" onclick="setTF('W',this)">Weekly</button>
   <button class="tf-btn" data-tf="M"   onclick="setTF('M',this)">Monthly</button>
   <span class="tf-note" id="tfNote"></span>
+  <span class="upd" id="updated"></span>
+  <button class="refresh-btn" id="refreshBtn" onclick="hardRefresh(this)" title="Refetch candles and prices">↻ Refresh</button>
 </div>
 
 <div class="layout">
@@ -412,6 +420,9 @@ const CG_URL   = 'https://api.coingecko.com/api/v3/coins/markets'
   + '?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false';
 const BYBIT    = 'https://api.bybit.com/v5/market/kline';
 const BYBIT_SYMS = 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000';
+const BYBIT_TICK = 'https://api.bybit.com/v5/market/tickers?category=linear';
+const PRICE_POLL_MS = 30000;  // live prices: one call covers every symbol
+const CANDLE_MAX_AGE = 15*60*1000; // refetch candles if older than this on a manual refresh
 const MAX_COINS = 150;  // ceiling; ~140 of the top 250 actually list on Bybit
 const CANDLES   = 500;  // history depth per symbol
 const CONCURRENCY = 8;  // measured: 140 symbols in ~7s, zero failures
@@ -466,6 +477,8 @@ let skipped     = { noPair: [], tooShort: [] };
 let mlOverridden = false;   // user hand-tuned the Money Line, stop auto-setting it
 let confirmedOnly = true;   // ignore the live unclosed bar (Bullmania does)
 let notListed   = [];       // top-250 coins with no Bybit perp
+let lastPriceAt = 0;        // when live prices last landed
+let reloading   = false;    // guard against overlapping candle reloads
 
 function loadFavs() {
   try { return new Set(JSON.parse(localStorage.getItem('cryptoFavs') || '[]')); }
@@ -794,6 +807,95 @@ function renderGrade(cfg) {
      </div>`;
 }
 
+
+// What timestamp should the CURRENT bar carry, for this timeframe?
+// Bybit's kline includes the live forming bar, so if our newest cached candle
+// is older than this, a bar has closed since we fetched and the trend is stale.
+function currentBarStart(tf) {
+  const now = new Date();
+  const HR = 3600e3;
+  if (tf === '60')  return Math.floor(Date.now() / HR) * HR;
+  if (tf === '240') return Math.floor(Date.now() / (4*HR)) * (4*HR);
+  if (tf === '720') return Math.floor(Date.now() / (12*HR)) * (12*HR);
+  if (tf === 'D')   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  if (tf === 'W') {                                   // Monday-anchored
+    const wd = (now.getUTCDay() + 6) % 7;
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - wd);
+  }
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);   // calendar month
+}
+
+// True once a new bar has opened since the candles were fetched
+function barsAreStale() {
+  const any = tokens.find(t => t.candles && t.candles.length);
+  if (!any) return false;
+  return any.candles[any.candles.length - 1].ts < currentBarStart(activeTF);
+}
+
+// Flips are decided on closed bars, but price, distance-to-line and the
+// pending flag all track the live market. Re-derived whenever a price arrives.
+function applyLivePrice(t, live) {
+  if (t.insufficient || !live) return;
+  t.price = live;
+  if (t.flipPrice) t.chg    = ((live - t.flipPrice) / t.flipPrice) * 100;
+  if (t.mlNow)     t.mlDist = ((live - t.mlNow) / t.mlNow) * 100;
+  const d = t.trend === 'warm' ? t.dir : t.trend;
+  t.pending = t.mlDist != null &&
+              ((d === 'bear' && t.mlDist > 0) || (d === 'bull' && t.mlDist < 0));
+}
+
+// One call returns every symbol's last price — far cheaper than refetching
+// 137 sets of candles, and candles only matter when a bar actually closes.
+async function refreshPrices(manual = false) {
+  try {
+    const r = await fetch(BYBIT_TICK);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    if (d.retCode !== 0) throw new Error(d.retMsg);
+    const px = new Map(d.result.list.map(x => [x.symbol, +x.lastPrice]));
+    let hit = 0;
+    tokens.forEach(t => {
+      const live = px.get(t.pair);
+      if (live) { applyLivePrice(t, live); hit++; }
+    });
+    lastPriceAt = Date.now();
+    render();
+    stampUpdated();
+    // A bar closed while the page sat open — flips are stale, rebuild them.
+    if (barsAreStale() && !reloading) {
+      reloading = true;
+      stampUpdated();
+      candleCache = {};
+      loadTimeframe(activeTF).finally(() => { reloading = false; });
+    }
+    return hit;
+  } catch (e) {
+    stampUpdated(e.message);
+    return 0;
+  }
+}
+
+function stampUpdated(err) {
+  const el = document.getElementById('updated');
+  if (!el) return;
+  if (err)              { el.textContent = '⚠ ' + err; el.style.color = 'var(--bear)'; return; }
+  if (reloading)        { el.textContent = 'New bar closed — refreshing trends…'; el.style.color = 'var(--accent)'; return; }
+  if (!lastPriceAt)     { el.textContent = ''; return; }
+  const s = Math.round((Date.now() - lastPriceAt) / 1000);
+  el.style.color = 'var(--muted2)';
+  el.textContent = 'Prices updated ' + (s < 5 ? 'just now' : s < 60 ? s + 's ago'
+                 : Math.floor(s/60) + 'm ago');
+}
+
+// Full reload — drops the candle cache so flips are recomputed from fresh bars
+async function hardRefresh(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  candleCache = {};
+  await loadTimeframe(activeTF);
+  await refreshPrices(true);
+  if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+}
+
 // Read the sidebar into a config object
 function currentCfg() {
   const engine = document.getElementById('mlEngine').value;
@@ -822,18 +924,7 @@ function recalcAll() {
     Object.assign(t, a || { trend:'warm', dir:'bull', flipMs:null, chg:null, mlDist:null, price:null, spark:[], sparkML:[] });
     // Flips come from closed bars, but price/change/distance should reflect
     // the live market — otherwise they lag by a whole bar.
-    if (a && confirmedOnly) {
-      const live = t.candles[t.candles.length - 1].close;
-      t.price  = live;
-      if (a.flipPrice) t.chg    = ((live - a.flipPrice) / a.flipPrice) * 100;
-      if (a.mlNow)     t.mlDist = ((live - a.mlNow) / a.mlNow) * 100;
-    }
-    // Live price has already breached the line, but the bar has not closed to
-    // confirm it. The trend still reads its old value — flag the pending flip
-    // rather than leaving the row looking self-contradictory.
-    const d = t.trend === 'warm' ? t.dir : t.trend;
-    t.pending = !t.insufficient && t.mlDist != null &&
-                ((d === 'bear' && t.mlDist > 0) || (d === 'bull' && t.mlDist < 0));
+    applyLivePrice(t, t.candles[t.candles.length - 1].close);
   });
   skipped.tooShort = short;
   renderGrade(cfg);
@@ -1028,6 +1119,10 @@ document.getElementById('search').addEventListener('input', render);
     applyTFDefaults(activeTF);
     await loadMeta();
     await loadTimeframe(activeTF);
+    await refreshPrices();
+    // Prices poll on their own cadence; the age label ticks every second.
+    setInterval(refreshPrices, PRICE_POLL_MS);
+    setInterval(() => stampUpdated(), 1000);
   } catch (e) {
     document.getElementById('tbody').innerHTML =
       `<tr><td colspan="10"><div class="msg">
