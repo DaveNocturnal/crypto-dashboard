@@ -55,6 +55,8 @@
     .pill-pct { font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:7px; }
     .pill-bull { background:var(--bullDim); color:var(--bull); }
     .pill-bear { background:var(--bearDim); color:var(--bear); }
+    .stat-sub { font-size:10.5px; color:var(--muted2); margin-top:4px; white-space:nowrap; }
+    .fng-tag { font-size:10px; font-weight:700; padding:3px 8px; border-radius:6px; letter-spacing:.3px; white-space:nowrap; }
 
     /* ── Timeframe bar ── */
     .tf-bar {
@@ -227,6 +229,20 @@
     <div class="stat-item">
       <div class="stat-key">Total Market Cap</div>
       <div class="stat-num" id="totalCap">—</div>
+      <div class="stat-sub" id="capChg"></div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-key">BTC Dominance</div>
+      <div class="stat-num" id="btcDom" style="color:#f7931a">—</div>
+      <div class="stat-sub" id="ethDom"></div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-key">Fear &amp; Greed</div>
+      <div class="stat-inline">
+        <span class="stat-num" id="fngVal">—</span>
+        <span class="fng-tag" id="fngTag"></span>
+      </div>
+      <div class="stat-sub" id="fngPrev"></div>
     </div>
     <div class="stat-item">
       <div class="stat-key">Total Tokens</div>
@@ -741,8 +757,10 @@ async function loadMeta() {
     });
   }
   notListed = unlisted;
-  document.getElementById('totalCap').textContent =
-    fmtCap(raw.reduce((s, c) => s + (c.market_cap || 0), 0));
+  // Provisional only — loadContext() replaces this with the true all-coin total
+  if (document.getElementById('totalCap').textContent === '—')
+    document.getElementById('totalCap').textContent =
+      fmtCap(raw.reduce((s, c) => s + (c.market_cap || 0), 0));
 }
 
 async function loadTimeframe(tf) {
@@ -807,6 +825,61 @@ function renderGrade(cfg) {
      </div>`;
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+//  MARKET CONTEXT — Fear & Greed + dominance (independent of the scanner)
+// ═══════════════════════════════════════════════════════════════
+const FNG_URL    = 'https://api.alternative.me/fng/?limit=2';
+const CG_GLOBAL  = 'https://api.coingecko.com/api/v3/global';
+const CONTEXT_MS = 5 * 60 * 1000;   // both move slowly; F&G updates once a day
+
+// Standard alternative.me bands
+function fngStyle(v) {
+  if (v <= 24) return { txt:'EXTREME FEAR', bg:'var(--bearDim)',  fg:'var(--bear)',  num:'var(--bear)' };
+  if (v <= 44) return { txt:'FEAR',         bg:'var(--bearDim)',  fg:'var(--bear)',  num:'var(--bear)' };
+  if (v <= 55) return { txt:'NEUTRAL',      bg:'var(--warnDim)',  fg:'var(--warn)',  num:'var(--warn)' };
+  if (v <= 75) return { txt:'GREED',        bg:'var(--bullDim)',  fg:'var(--bull)',  num:'var(--bull)' };
+  return         { txt:'EXTREME GREED',     bg:'var(--bullDim)',  fg:'var(--bull)',  num:'var(--bull)' };
+}
+
+async function loadContext() {
+  // Independent of each other and of the scanner — one failing must not
+  // blank the other or block the table.
+  const [fng, global] = await Promise.allSettled([
+    fetch(FNG_URL).then(r => r.json()),
+    fetch(CG_GLOBAL).then(r => r.json()),
+  ]);
+
+  if (fng.status === 'fulfilled' && fng.value?.data?.length) {
+    const [now, prev] = fng.value.data;
+    const v = +now.value, s = fngStyle(v);
+    const el = document.getElementById('fngVal');
+    el.textContent = v; el.style.color = s.num;
+    const tag = document.getElementById('fngTag');
+    tag.textContent = s.txt; tag.style.background = s.bg; tag.style.color = s.fg;
+    if (prev) {
+      const d = v - +prev.value;
+      document.getElementById('fngPrev').textContent =
+        `${d >= 0 ? '▲' : '▼'} ${Math.abs(d)} vs yesterday (${prev.value})`;
+    }
+  }
+
+  if (global.status === 'fulfilled' && global.value?.data) {
+    const g = global.value.data;
+    const btc = g.market_cap_percentage?.btc, eth = g.market_cap_percentage?.eth;
+    if (btc != null) document.getElementById('btcDom').textContent = btc.toFixed(1) + '%';
+    if (eth != null) document.getElementById('ethDom').textContent = 'ETH ' + eth.toFixed(1) + '%';
+    // /global counts every listed coin, so it beats summing our 250-coin slice
+    if (g.total_market_cap?.usd)
+      document.getElementById('totalCap').textContent = fmtCap(g.total_market_cap.usd);
+    const ch = g.market_cap_change_percentage_24h_usd;
+    if (ch != null) {
+      const el = document.getElementById('capChg');
+      el.textContent = `${ch >= 0 ? '+' : ''}${ch.toFixed(2)}% 24h`;
+      el.style.color = ch >= 0 ? 'var(--bull)' : 'var(--bear)';
+    }
+  }
+}
 
 // What timestamp should the CURRENT bar carry, for this timeframe?
 // Bybit's kline includes the live forming bar, so if our newest cached candle
@@ -891,6 +964,7 @@ function stampUpdated(err) {
 async function hardRefresh(btn) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   candleCache = {};
+  loadContext();
   await loadTimeframe(activeTF);
   await refreshPrices(true);
   if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
@@ -1117,12 +1191,14 @@ document.getElementById('search').addEventListener('input', render);
 (async () => {
   try {
     applyTFDefaults(activeTF);
+    loadContext();          // fire and forget — never blocks the scanner
     await loadMeta();
     await loadTimeframe(activeTF);
     await refreshPrices();
     // Prices poll on their own cadence; the age label ticks every second.
     setInterval(refreshPrices, PRICE_POLL_MS);
     setInterval(() => stampUpdated(), 1000);
+    setInterval(loadContext, CONTEXT_MS);
   } catch (e) {
     document.getElementById('tbody').innerHTML =
       `<tr><td colspan="10"><div class="msg">
